@@ -47,6 +47,8 @@ pnpm build
 - action queue、fold/check/call/bet/raise/all-in。
 - bet-to 金额、min raise、短码 all-in、raise rights reopen。
 - preflop/postflop 顺序、街结束和全员 all-in 自动推进。
+- 基于行动历史的 `DecisionSpotClassifier`：open raise、3bet、4bet、5bet+、squeeze、limp-reraise、back-raise、check-raise、postflop re-raise、c-bet/delayed c-bet、donk/probe 与多街 barrel。
+- spot 标签只做派生语义，不参与或绕过底层合法动作校验。
 
 ### 1.4 Pot/showdown
 
@@ -60,6 +62,7 @@ pnpm build
 - 单元测试覆盖每条规则。
 - property-based：筹码守恒、牌唯一、state deterministic、pot conservation。
 - 黄金用例：至少 30 个复杂下注/边池/平分案例。
+- spot 分类黄金用例覆盖位置变化、多人 call、短码 all-in/reopen、跨街重置以及 check-raise 正反例。
 - evaluator 用已知牌型全集边界与独立 fixtures 校验。
 - fuzz 随机合法命令至少运行 10k 手牌无 invariant failure。
 
@@ -91,6 +94,7 @@ pnpm build
 - Z/J/L/H/P 初始 `ProfileVersion` seed 数据。
 - 动态 `PlayerSessionState` 与 per-opponent Hero read。
 - Feature Extractor、Prior Builder V1、sizing buckets。
+- 画像与 prior 覆盖 3bet/4bet、fold/call/4bet vs 3bet、squeeze、分街 check-raise、fold vs check-raise，并区分 value/bluff/semi-bluff gate。
 - `PlayerDecisionProvider` adapter（先 fake，再接首个真实 provider）。
 - structured output、Zod/semantic/rule guard、timeout、fallback。
 - AI 调用审计和 prompt/profile/version 保存。
@@ -101,6 +105,7 @@ pnpm build
 - AI 永远看不到其他 hole cards/未来 board（DTO snapshot test）。
 - 10k 场景统计回归落在各画像预设区间。
 - Z tilt、J vs Hero large bet、L/P price sensitivity 的定向测试通过。
+- 3bet/4bet/check-raise 的位置、有效筹码、对手和多人池定向测试通过；非法或 raise 权未开放的策略权重必须为 0。
 - 同 seed 回放使用已保存动作得到相同最终状态。
 
 ## 6. 阶段 4（P1-A）：Training / Deep Mode
@@ -142,6 +147,7 @@ pnpm build
 
 - taxonomy、occurrence、聚合任务。
 - 次数/机会率、趋势、街道、对手、典型牌例。
+- 3bet opportunity、fold/call/4bet vs 3bet、fold vs 4bet、squeeze、check-raise、fold vs check-raise 均以合法机会数为分母，并可下钻到对应牌例。
 - EV loss 无可靠方法时显示“未估算”，不输出假精度。
 
 ### Profile Feedback

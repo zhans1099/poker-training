@@ -187,6 +187,16 @@ type HandEvent =
 
 内部统一将 `amount` 定义为 **行动后本街累计投入（raise-to/bet-to）**，不是增量；UI 可以显示“加到 800”，API 不接受歧义金额。
 
+规则动作与策略语义分层处理：规则引擎只执行 fold/check/call/bet/raise/all-in；`DecisionSpotClassifier` 依据不可变行动历史确定性标注 open raise、3bet、4bet、5bet+、squeeze、limp-reraise、back-raise、check-raise、postflop re-raise、c-bet、delayed c-bet、donk/probe bet 和多街 barrel。客户端和 AI 均不得自行声明这些标签。
+
+其中：
+
+- preflop 首次主动加注为 open raise，后续每次加注依次形成 3bet、4bet、5bet+；盲注不计为一次 bet。
+- check-raise 要求同一玩家在同一街先 check，随后面对其他玩家 bet 再 raise。
+- squeeze 要求面对一次 open raise 和至少一次 call 后再加注。
+- 标签分类不改变合法动作、最小加注或 reopen 规则；它仅供画像 prior、复盘和统计使用。
+- 分类器带版本号，同一事件序列和分类器版本必须产生同一 spot 标签。
+
 `LegalActionSet` 至少包含：
 
 ```ts
@@ -344,6 +354,8 @@ poker-trainer/
 
 - 次数、估算 EV 损失、趋势、街道、对手、典型手牌。
 - 支持样本量提示，避免把少量牌例当稳定 leak。
+- 独立展示 3bet opportunity/频率、fold/call/4bet vs 3bet、fold vs 4bet、squeeze、check-raise 及 fold vs check-raise；所有频率使用“发生次数 / 合法机会次数”，不可只除以总手数。
+- 每个统计项可以下钻到对应牌例和当时的决策点，区分位置、街道、对手、有效筹码与单挑/多人池。
 
 ### Real Hand Import
 

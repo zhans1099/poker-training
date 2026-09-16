@@ -98,6 +98,8 @@ interface PlayerDecisionInput {
 - 当前手牌类别、overcards、pair tier、draw 类型、组合 draw。
 - board texture：paired/monotone/two-tone、连接度、high-card density、动态程度。
 - action pressure：首次 bet、面对 raise、3bet pot、all-in 等。
+- preflop raise level：open、3bet、4bet、5bet+；以及 squeeze、limp-reraise、back-raise。
+- postflop line：c-bet、delayed c-bet、donk/probe、check-raise、面对 check-raise、re-raise、double/triple barrel。
 - Hero 是否为 aggressor、下注相对 pot 的 bucket。
 - tilt/loss/chasing/read 的离散 bucket。
 
@@ -149,6 +151,9 @@ probabilities = softmax(maskIllegal(scores), temperatureByProfile)
 - J 面对 Hero 大尺度：`largeBetBluffReputation` 与 `heroCallFrequency` 提高 bluff-catch CALL；主动 RAISE/ALL_IN 仍由更强 value gate 约束。
 - L/P 根据 pot odds、位置和 multiway 更敏感；P 风险温度低于 L。
 - Hero 最近连续展示 value：各观察者对 Hero 的 bluff adjustment 按证据与衰减降低。
+- 3bet/4bet 不能只套用全局频率：必须按位置组合、有效筹码、前序 caller 数量、对手 fold/call/4bet 倾向及 value/bluff gate 调整。
+- check-raise prior 必须要求本街已有 check -> 对手 bet 的合法历史，并按街道分别使用画像频率；强成牌、听牌 semi-bluff 和 air bluff 使用不同上限。
+- 面对 3bet、4bet 或 check-raise 时，分别生成 fold/call/re-raise 权重；不得用单一 `foldToRaise` 覆盖全部场景。
 
 所有 adjustment 都必须有 cap，并记录 `features`，以便回归和解释。
 
@@ -328,6 +333,10 @@ prompts/hand-review/v1/schema.json
 - J raise/all-in range 比 call range 强。
 - P 的高风险动作频率在同 spot 低于 L。
 - illegal actions 在调用模型前概率即为 0。
+- 相同手牌在不同位置组合下的 open/3bet/4bet prior 有可解释差异。
+- squeeze 只有在 open + call 的历史结构中可被标注和加权。
+- check-raise 只有同街先 check 后面对 bet 时成立；直接 raise 不得误标。
+- 短码 all-in 未重新开放 raise 权时，即使画像偏好 4bet/re-raise，其概率仍必须为 0。
 
 ### Contract/chaos 测试
 

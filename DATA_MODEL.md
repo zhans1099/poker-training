@@ -48,6 +48,10 @@ interface PlayerProfileParams {
   pfr: Probability
   threeBetFrequency: Probability
   fourBetFrequency: Probability
+  foldToThreeBet: Probability
+  callThreeBetFrequency: Probability
+  fourBetBluffFrequency: Probability
+  foldToFourBet: Probability
   limpFrequency: Probability
   coldCallFrequency: Probability
   squeezeFrequency: Probability
@@ -70,6 +74,11 @@ interface PlayerProfileParams {
   allInBluffFrequency: Probability
   slowPlayFrequency: Probability
   trapFrequency: Probability
+  flopCheckRaiseFrequency: Probability
+  turnCheckRaiseFrequency: Probability
+  riverCheckRaiseFrequency: Probability
+  checkRaiseBluffFrequency: Probability
+  foldToCheckRaise: Probability
 
   // Mental tendencies
   tiltSensitivity: Probability
@@ -90,6 +99,8 @@ interface ProfileVersion {
   createdAt: string
 }
 ```
+
+`threeBetFrequency`、`fourBetFrequency`、各街 `*CheckRaiseFrequency` 等是画像倾向，不是某一次决策的机械概率。实际 prior 必须同时考虑位置、有效筹码、牌力/听牌、单挑或多人池、下注尺度、行动历史和动态状态。value、bluff、semi-bluff 的组成也必须受牌力 gate 约束，不能仅凭画像频率产生无条件激进行动。
 
 所有字段 V1 都提供显式默认值，避免 `undefined` 在 prior 中被误当 0。建议初值：
 
@@ -208,6 +219,35 @@ interface Pot {
 `pot` 不作为独立可写字段；展示值为 pots/贡献 ledger 的派生结果。
 
 ## 5. 训练输入
+
+### 5.1 决策点策略语义
+
+规则引擎只接受 `CHECK/BET/CALL/RAISE/FOLD/ALL_IN` 等标准动作；训练、画像和统计层根据完整行动历史确定性推导策略语义：
+
+```ts
+type DecisionSpot =
+  | 'OPEN_RAISE'
+  | 'THREE_BET'
+  | 'FOUR_BET'
+  | 'FIVE_BET_PLUS'
+  | 'SQUEEZE'
+  | 'LIMP_RERAISE'
+  | 'BACK_RAISE'
+  | 'CHECK_RAISE'
+  | 'RERAISE_POSTFLOP'
+  | 'CBET'
+  | 'DELAYED_CBET'
+  | 'DONK_BET'
+  | 'PROBE_BET'
+  | 'DOUBLE_BARREL'
+  | 'TRIPLE_BARREL'
+```
+
+- Preflop 首次非盲注加注为 open raise；对其再加注为 3bet，再加注为 4bet，依次类推。
+- 玩家本街先 check，面对后位 bet 后再 raise，才标记为 check-raise。
+- Squeeze、limp-reraise、back-raise 必须根据此前参与方式和行动顺序识别。
+- `DecisionSpot` 是从事件日志重建的派生事实，不由客户端或 AI 自报，也不改变底层合法动作语义。
+- 每个 `HeroDecision` 和 `AiDecision` 保存推导出的 spot/version，保证复盘和统计口径可追踪。
 
 ```ts
 type TrainingMode = 'QUICK' | 'TRAINING' | 'DEEP'
