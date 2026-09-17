@@ -35,6 +35,7 @@ function createClient() {
     password: decodeURIComponent(parsed.password),
     database,
     connectionLimit: 5,
+    allowPublicKeyRetrieval: true,
   })
 
   return new PrismaClient({ adapter })
