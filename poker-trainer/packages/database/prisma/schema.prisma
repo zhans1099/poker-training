@@ -1,0 +1,312 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum PlayerKind {
+  HERO
+  OPPONENT
+}
+
+enum SessionStatus {
+  ACTIVE
+  COMPLETED
+  ABANDONED
+}
+
+enum HandStatus {
+  ACTIVE
+  FROZEN
+  COMPLETED
+}
+
+enum DecisionSource {
+  PRIOR
+  LLM
+  FALLBACK
+}
+
+enum FeedbackSentiment {
+  LIKE_PLAYER
+  UNLIKE_PLAYER
+  CORRECTION
+}
+
+enum FeedbackStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+model Player {
+  id                     String               @id @default(cuid()) @db.VarChar(30)
+  code                   String               @unique @db.VarChar(40)
+  displayName            String               @map("display_name") @db.VarChar(80)
+  kind                   PlayerKind           @default(OPPONENT)
+  enabled                Boolean              @default(true)
+  activeProfileVersionId String?              @map("active_profile_version_id") @db.VarChar(30)
+  createdAt              DateTime             @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt              DateTime             @updatedAt @map("updated_at") @db.DateTime(3)
+  profileVersions        ProfileVersion[]     @relation("PlayerProfiles")
+  activeProfileVersion   ProfileVersion?      @relation("ActiveProfile", fields: [activeProfileVersionId], references: [id], onDelete: SetNull)
+  sessionParticipants    SessionParticipant[]
+  handParticipants       HandParticipant[]
+  handEvents             HandEvent[]
+  heroDecisions          HeroDecision[]
+  aiDecisions            AiDecision[]
+  observerReads          OpponentRead[]       @relation("ReadObserver")
+  subjectReads           OpponentRead[]       @relation("ReadSubject")
+  profileFeedback        ProfileFeedback[]
+
+  @@index([enabled, kind])
+  @@map("players")
+}
+
+model ProfileVersion {
+  id               String            @id @default(cuid()) @db.VarChar(30)
+  playerId         String            @map("player_id") @db.VarChar(30)
+  version          Int
+  label            String?           @db.VarChar(120)
+  profile          Json
+  source           String            @default("MANUAL") @db.VarChar(30)
+  createdAt        DateTime          @default(now()) @map("created_at") @db.DateTime(3)
+  player           Player            @relation("PlayerProfiles", fields: [playerId], references: [id], onDelete: Cascade)
+  activeFor        Player[]          @relation("ActiveProfile")
+  aiDecisions      AiDecision[]
+  handParticipants HandParticipant[]
+  appliedFeedback  ProfileFeedback[] @relation("AppliedProfileVersion")
+
+  @@unique([playerId, version])
+  @@index([playerId, createdAt])
+  @@map("profile_versions")
+}
+
+model TrainingSession {
+  id            String               @id @default(cuid()) @db.VarChar(30)
+  status        SessionStatus        @default(ACTIVE)
+  tableSize     Int                  @map("table_size") @db.UnsignedTinyInt
+  smallBlind    Int                  @map("small_blind") @db.UnsignedInt
+  bigBlind      Int                  @map("big_blind") @db.UnsignedInt
+  startingStack Int                  @map("starting_stack") @db.UnsignedInt
+  config        Json?
+  startedAt     DateTime             @default(now()) @map("started_at") @db.DateTime(3)
+  completedAt   DateTime?            @map("completed_at") @db.DateTime(3)
+  participants  SessionParticipant[]
+  hands         Hand[]
+  opponentReads OpponentRead[]
+
+  @@index([status, startedAt])
+  @@map("training_sessions")
+}
+
+model SessionParticipant {
+  id        String          @id @default(cuid()) @db.VarChar(30)
+  sessionId String          @map("session_id") @db.VarChar(30)
+  playerId  String          @map("player_id") @db.VarChar(30)
+  seatNo    Int             @map("seat_no") @db.UnsignedTinyInt
+  stack     Int             @db.UnsignedInt
+  state     Json?
+  session   TrainingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  player    Player          @relation(fields: [playerId], references: [id], onDelete: Restrict)
+
+  @@unique([sessionId, seatNo])
+  @@unique([sessionId, playerId])
+  @@index([playerId])
+  @@map("session_participants")
+}
+
+model Hand {
+  id              String            @id @default(cuid()) @db.VarChar(30)
+  sessionId       String            @map("session_id") @db.VarChar(30)
+  handNo          Int               @map("hand_no") @db.UnsignedInt
+  status          HandStatus        @default(ACTIVE)
+  seedHash        String            @map("seed_hash") @db.VarChar(128)
+  version         Int               @default(0) @db.UnsignedInt
+  buttonSeat      Int               @map("button_seat") @db.UnsignedTinyInt
+  state           Json
+  result          Json?
+  stateHash       String?           @map("state_hash") @db.VarChar(128)
+  startedAt       DateTime          @default(now()) @map("started_at") @db.DateTime(3)
+  completedAt     DateTime?         @map("completed_at") @db.DateTime(3)
+  session         TrainingSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  participants    HandParticipant[]
+  events          HandEvent[]
+  decisions       HeroDecision[]
+  aiDecisions     AiDecision[]
+  reviews         HandReview[]
+  leaks           LeakOccurrence[]
+  profileFeedback ProfileFeedback[]
+
+  @@unique([sessionId, handNo])
+  @@index([sessionId, startedAt])
+  @@index([status, startedAt])
+  @@map("hands")
+}
+
+model HandParticipant {
+  id               String         @id @default(cuid()) @db.VarChar(30)
+  handId           String         @map("hand_id") @db.VarChar(30)
+  playerId         String         @map("player_id") @db.VarChar(30)
+  profileVersionId String         @map("profile_version_id") @db.VarChar(30)
+  seatNo           Int            @map("seat_no") @db.UnsignedTinyInt
+  startingStack    Int            @map("starting_stack") @db.UnsignedInt
+  endingStack      Int?           @map("ending_stack") @db.UnsignedInt
+  holeCards        Json?          @map("hole_cards")
+  hand             Hand           @relation(fields: [handId], references: [id], onDelete: Cascade)
+  player           Player         @relation(fields: [playerId], references: [id], onDelete: Restrict)
+  profileVersion   ProfileVersion @relation(fields: [profileVersionId], references: [id], onDelete: Restrict)
+
+  @@unique([handId, seatNo])
+  @@unique([handId, playerId])
+  @@index([playerId, handId])
+  @@index([profileVersionId])
+  @@map("hand_participants")
+}
+
+model HandEvent {
+  id         String   @id @default(cuid()) @db.VarChar(30)
+  handId     String   @map("hand_id") @db.VarChar(30)
+  sequenceNo Int      @map("sequence_no") @db.UnsignedInt
+  eventType  String   @map("event_type") @db.VarChar(50)
+  actorId    String?  @map("actor_id") @db.VarChar(30)
+  commandId  String?  @map("command_id") @db.VarChar(64)
+  payload    Json
+  createdAt  DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  hand       Hand     @relation(fields: [handId], references: [id], onDelete: Cascade)
+  actor      Player?  @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@unique([handId, sequenceNo])
+  @@unique([handId, commandId])
+  @@index([actorId, createdAt])
+  @@map("hand_events")
+}
+
+model HeroDecision {
+  id            String           @id @default(cuid()) @db.VarChar(30)
+  handId        String           @map("hand_id") @db.VarChar(30)
+  heroId        String           @map("hero_id") @db.VarChar(30)
+  eventSequence Int              @map("event_sequence") @db.UnsignedInt
+  actorView     Json             @map("actor_view")
+  thoughtInput  Json?            @map("thought_input")
+  legalActions  Json             @map("legal_actions")
+  chosenAction  Json             @map("chosen_action")
+  createdAt     DateTime         @default(now()) @map("created_at") @db.DateTime(3)
+  hand          Hand             @relation(fields: [handId], references: [id], onDelete: Cascade)
+  hero          Player           @relation(fields: [heroId], references: [id], onDelete: Restrict)
+  leaks         LeakOccurrence[]
+
+  @@unique([handId, eventSequence])
+  @@index([heroId, createdAt])
+  @@map("hero_decisions")
+}
+
+model AiDecision {
+  id               String         @id @default(cuid()) @db.VarChar(30)
+  handId           String         @map("hand_id") @db.VarChar(30)
+  playerId         String         @map("player_id") @db.VarChar(30)
+  profileVersionId String         @map("profile_version_id") @db.VarChar(30)
+  eventSequence    Int            @map("event_sequence") @db.UnsignedInt
+  provider         String         @db.VarChar(40)
+  model            String         @db.VarChar(80)
+  source           DecisionSource
+  promptVersion    String         @map("prompt_version") @db.VarChar(40)
+  actorView        Json           @map("actor_view")
+  output           Json
+  validation       Json?
+  latencyMs        Int?           @map("latency_ms") @db.UnsignedInt
+  inputTokens      Int?           @map("input_tokens") @db.UnsignedInt
+  outputTokens     Int?           @map("output_tokens") @db.UnsignedInt
+  createdAt        DateTime       @default(now()) @map("created_at") @db.DateTime(3)
+  hand             Hand           @relation(fields: [handId], references: [id], onDelete: Cascade)
+  player           Player         @relation(fields: [playerId], references: [id], onDelete: Restrict)
+  profileVersion   ProfileVersion @relation(fields: [profileVersionId], references: [id], onDelete: Restrict)
+
+  @@unique([handId, eventSequence, playerId])
+  @@index([playerId, createdAt])
+  @@index([provider, model, createdAt])
+  @@map("ai_decisions")
+}
+
+model HandReview {
+  id            String   @id @default(cuid()) @db.VarChar(30)
+  handId        String   @map("hand_id") @db.VarChar(30)
+  version       Int
+  provider      String   @db.VarChar(40)
+  model         String   @db.VarChar(80)
+  promptVersion String   @map("prompt_version") @db.VarChar(40)
+  review        Json
+  createdAt     DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  hand          Hand     @relation(fields: [handId], references: [id], onDelete: Cascade)
+
+  @@unique([handId, version])
+  @@index([handId, createdAt])
+  @@map("hand_reviews")
+}
+
+model LeakOccurrence {
+  id             String        @id @default(cuid()) @db.VarChar(30)
+  handId         String        @map("hand_id") @db.VarChar(30)
+  heroDecisionId String?       @map("hero_decision_id") @db.VarChar(30)
+  leakCode       String        @map("leak_code") @db.VarChar(80)
+  street         String        @db.VarChar(20)
+  severity       Int           @db.UnsignedTinyInt
+  evidence       Json
+  createdAt      DateTime      @default(now()) @map("created_at") @db.DateTime(3)
+  hand           Hand          @relation(fields: [handId], references: [id], onDelete: Cascade)
+  heroDecision   HeroDecision? @relation(fields: [heroDecisionId], references: [id], onDelete: SetNull)
+
+  @@index([leakCode, createdAt])
+  @@index([handId, createdAt])
+  @@index([heroDecisionId])
+  @@map("leak_occurrences")
+}
+
+model OpponentRead {
+  id          String           @id @default(cuid()) @db.VarChar(30)
+  observerId  String           @map("observer_id") @db.VarChar(30)
+  subjectId   String           @map("subject_id") @db.VarChar(30)
+  sessionId   String?          @map("session_id") @db.VarChar(30)
+  scopeKey    String           @default("GLOBAL") @map("scope_key") @db.VarChar(40)
+  metrics     Json
+  confidence  Float            @default(0)
+  sampleCount Int              @default(0) @map("sample_count") @db.UnsignedInt
+  createdAt   DateTime         @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt   DateTime         @updatedAt @map("updated_at") @db.DateTime(3)
+  observer    Player           @relation("ReadObserver", fields: [observerId], references: [id], onDelete: Cascade)
+  subject     Player           @relation("ReadSubject", fields: [subjectId], references: [id], onDelete: Cascade)
+  session     TrainingSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([observerId, subjectId, scopeKey])
+  @@index([subjectId, scopeKey])
+  @@index([sessionId])
+  @@map("opponent_reads")
+}
+
+model ProfileFeedback {
+  id                      String            @id @default(cuid()) @db.VarChar(30)
+  playerId                String            @map("player_id") @db.VarChar(30)
+  handId                  String?           @map("hand_id") @db.VarChar(30)
+  sourceHandRef           String?           @map("source_hand_ref") @db.VarChar(80)
+  sentiment               FeedbackSentiment
+  trait                   String?           @db.VarChar(80)
+  observation             String            @db.Text
+  observedAction          Json?             @map("observed_action")
+  proposedPatch           Json?             @map("proposed_patch")
+  confidence              Float             @default(0.5)
+  status                  FeedbackStatus    @default(PENDING)
+  appliedProfileVersionId String?           @map("applied_profile_version_id") @db.VarChar(30)
+  createdAt               DateTime          @default(now()) @map("created_at") @db.DateTime(3)
+  resolvedAt              DateTime?         @map("resolved_at") @db.DateTime(3)
+  player                  Player            @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  hand                    Hand?             @relation(fields: [handId], references: [id], onDelete: SetNull)
+  appliedProfileVersion   ProfileVersion?   @relation("AppliedProfileVersion", fields: [appliedProfileVersionId], references: [id], onDelete: SetNull)
+
+  @@index([playerId, status, createdAt])
+  @@index([handId])
+  @@index([appliedProfileVersionId])
+  @@map("profile_feedback")
+}

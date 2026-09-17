@@ -1,0 +1,10 @@
+.npm-cache/
+poker-trainer/node_modules/
+poker-trainer/**/node_modules/
+poker-trainer/**/.next/
+poker-trainer/**/dist/
+poker-trainer/**/coverage/
+poker-trainer/packages/database/src/generated/
+poker-trainer/.pnpm-store/
+*.tsbuildinfo
+poker-trainer/.env

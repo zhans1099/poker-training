@@ -13,7 +13,7 @@
 - pnpm workspace、Next.js TypeScript 应用与 packages 骨架。
 - ESLint、Prettier、Vitest、Playwright、TypeScript strict。
 - Zod DTO 包、领域基础类型、统一错误码。
-- Prisma + SQLite、首次 migration、Repository 接口。
+- Prisma + MySQL 8、首次 migration、Repository 接口。
 - CI：install、lint、typecheck、unit test、build。
 - ADR：技术栈、金额语义 bet-to、seed/RNG、event log、RuoYi 隔离。
 
@@ -91,7 +91,8 @@ pnpm build
 
 交付：
 
-- Z/J/L/H/P 初始 `ProfileVersion` seed 数据。
+- 数据库驱动的玩家 CRUD/启停与画像版本管理；规则和 UI 不硬编码玩家名单。
+- Z/J/L/H/P 仅作为初始 `Player` 与 `ProfileVersion` seed 数据，后续可直接新增熟人角色。
 - 动态 `PlayerSessionState` 与 per-opponent Hero read。
 - Feature Extractor、Prior Builder V1、sizing buckets。
 - 画像与 prior 覆盖 3bet/4bet、fold/call/4bet vs 3bet、squeeze、分街 check-raise、fold vs check-raise，并区分 value/bluff/semi-bluff gate。
@@ -101,6 +102,7 @@ pnpm build
 
 验收：
 
+- 新增一个非预置玩家后，无需改代码即可入座、加载画像并由 AI 行动；停用玩家不能加入新 session，但历史记录仍可查询。
 - provider 返回任意异常都不会使 hand 崩溃或停死。
 - AI 永远看不到其他 hole cards/未来 board（DTO snapshot test）。
 - 10k 场景统计回归落在各画像预设区间。
@@ -176,7 +178,7 @@ pnpm build
 - 基于反馈的 bounded profile suggestions。
 - equity Monte Carlo（明确对手 range 假设、样本数、置信区间）。
 - session 级训练推荐与间隔复习。
-- PostgreSQL 迁移、账号/多设备同步。
+- 账号/多设备同步、MySQL 读写与归档策略优化。
 - prompt/profile A/B 与统计显著性报告。
 
 仍不进入 CFR/Deep CFR/multiplayer solver。
@@ -188,7 +190,7 @@ pnpm build
 | Domain unit | Vitest | 单条规则与数学函数 |
 | Property | fast-check | 守恒、唯一性、determinism |
 | Golden fixtures | JSON fixtures | side pot、min raise、odd chip、真实牌例 |
-| Repository | 临时 SQLite | 事务、唯一约束、重放 |
+| Repository | 独立 MySQL 测试库 | 事务、唯一约束、重放 |
 | API contract | Route handler tests | Zod、鉴权、幂等、乐观锁 |
 | AI contract | fake/chaos provider | malformed/timeout/illegal/fallback |
 | Statistical | seeded batch | 人物画像长期频率 |
@@ -220,7 +222,7 @@ pnpm build
 | AI 输出不合法或超时 | 牌局停死 | strict schema、guard、deterministic fallback |
 | 画像参数与行为脱节 | “不像本人” | prior 可解释 features、统计回归、用户反馈版本化 |
 | Reviewer 结果导向 | 错误训练 | decision snapshot 优先、outcome 隔离、反转测试 |
-| SQLite 写并发限制 | 后期扩展受限 | 短事务、Repository 边界、PostgreSQL 迁移路径 |
+| MySQL 并发写入与事件表增长 | 回放和报表变慢 | 短事务、组合索引、游标分页和事件归档 |
 | 过早做复杂 solver | 延迟验证产品价值 | P0-P3 scope gate，先验证熟人 exploit 训练闭环 |
 | 现有 RuoYi 与新应用职责混乱 | 重复模型/维护成本 | V1 目录与部署隔离；只通过 API 集成 |
 

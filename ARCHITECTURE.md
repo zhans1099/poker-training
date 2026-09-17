@@ -12,7 +12,7 @@
 - API：Next.js Route Handlers/Server Actions，只承担鉴权、DTO 校验、用例编排和流式状态推送。
 - 规则：独立的纯 TypeScript `poker-engine` 包；不访问数据库、不调用 LLM、不依赖 UI。
 - AI：独立的 `ai-orchestrator` 包；玩家决策与牌后复盘使用不同接口、Prompt、上下文和调用记录。
-- 数据：Prisma + SQLite（V1 单机）；通过 Repository 接口隔离，为 PostgreSQL 迁移预留边界。
+- 数据：Prisma + MySQL 8；通过 Repository 接口隔离数据库访问，统一使用 `utf8mb4`、外键、唯一约束和短事务。
 - 校验：Zod 作为 API、AI 输出、快照和导入数据的运行时 schema。
 - 牌型：使用经过验证且支持 5/7 张牌的 evaluator 库，并用黄金用例交叉验证；洗牌、下注、边池仍由本项目实现。
 
@@ -69,7 +69,7 @@ Browser
               -> Output Guard + Fallback
               -> Review Model Provider (isolated)
           -> Repositories (Prisma)
-              -> SQLite / later PostgreSQL
+              -> MySQL 8
 ```
 
 ### 3.1 Poker Engine
@@ -117,10 +117,18 @@ Browser
 
 采用 event log + snapshots 的折中：
 
+- 除 Hero 外的所有角色都由数据库驱动：`Player` 保存身份与启用状态，`ProfileVersion` 保存不可变画像版本，`PlayerSessionState` 保存本场动态状态，`OpponentRead` 保存其对 Hero 的独立判断。Z/J/L/H/P 仅是首批 seed 数据，不是代码枚举；以后新增玩家无需修改规则引擎。
+- Hero 仍保留一条轻量 `Player(kind=HERO)` 记录，便于座位、行动和外键统一；但 Hero 不走 AI 决策画像。其他玩家眼中的 Hero Image 存在各自的 `OpponentRead` 中。
 - `HandEvent` 是审计与回放依据，追加写。
 - `HandSnapshot` 在 Hero 决策点、街转换、手牌结束保存，加速恢复。
 - `Hand` 保存摘要、seed、版本及结果。
 - 画像、动态状态、AI 调用、训练输入、review、leak 分开存储。
+
+对局与分析全部持久化，但区分事实源和缓存：
+
+- 事实源：session、参与者、每个 action/event、筹码与 pot 变化、Hero 思考输入、AI 最终动作及调用元数据、showdown、review 和每条 leak occurrence。
+- 可重建数据：当前 hand snapshot、统计报表和 `LeakAggregate`。这些数据也可以落库以加速读取，但损坏或口径升级后必须能从事实记录重新生成。
+- 默认不把隐藏的模型 chain-of-thought 当分析事实保存；只保存结构化 reasoning tags、合法性校验结果以及按安全策略保留的 raw response/reference。
 
 数据库不是事件执行器。加载时由应用层读取最新 snapshot 并重放其后的事件；开发/测试可从初始事件全量重放，验证 hash 一致。
 
@@ -336,7 +344,8 @@ poker-trainer/
 
 ### Player Profiles
 
-- Z/J/L/H/P 的静态画像、动态状态、对 Hero read 分区显示。
+- 列表和详情从数据库读取；Z/J/L/H/P 是初始角色，可新增、停用或恢复任意熟人玩家，不在前端写死名单。
+- 每位非 Hero 玩家展示静态画像、动态状态和其对 Hero 的 read。
 - slider 保存为新 `ProfileVersion`；历史手牌继续引用旧版本。
 - Hero 页面维护“各对手眼中的 Hero”，不能只存一个全局 image。
 
@@ -376,7 +385,7 @@ poker-trainer/
 
 - V1 使用独立 TypeScript 应用，不改造 RuoYi。
 - 筹码用整数，金额为 bet-to。
-- event log + snapshot；SQLite 起步。
+- event log + snapshot；MySQL 8 持久化。
 - AI 玩家与 reviewer 强隔离。
 
 实现前需产品确认但不阻塞架构：

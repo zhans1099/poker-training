@@ -10,27 +10,28 @@
 4. 事件追加写；摘要和 snapshot 可重建。
 5. 私有牌与公开事件分开存储，API 默认不返回私有 payload。
 6. JSON 只存高变化、低查询价值的数据；需要筛选/聚合的字段关系化。
-7. SQLite V1 中枚举以字符串 + 应用层 Zod 约束；迁移 PostgreSQL 时可再评估原生 enum。
+7. MySQL V1 由 Prisma enum、数据库约束与应用层 Zod 共同约束枚举值；对外 DTO 不直接暴露数据库枚举实现。
 
 ## 2. 领域值对象
 
 ```ts
-type PlayerId = string
-type HandId = string
-type Chips = number // safe integer, >= 0
-type Probability = number // 0..1
-type Street = 'PREFLOP' | 'FLOP' | 'TURN' | 'RIVER' | 'SHOWDOWN'
-type Suit = 'c' | 'd' | 'h' | 's'
-type Rank = '2'|'3'|'4'|'5'|'6'|'7'|'8'|'9'|'T'|'J'|'Q'|'K'|'A'
-type Card = `${Rank}${Suit}`
+type PlayerId = string;
+type HandId = string;
+type Chips = number; // safe integer, >= 0
+type Probability = number; // 0..1
+type Street = "PREFLOP" | "FLOP" | "TURN" | "RIVER" | "SHOWDOWN";
+type Suit = "c" | "d" | "h" | "s";
+type Rank =
+  "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "T" | "J" | "Q" | "K" | "A";
+type Card = `${Rank}${Suit}`;
 
 type PlayerAction =
-  | { type: 'FOLD' }
-  | { type: 'CHECK' }
-  | { type: 'CALL'; to: Chips }
-  | { type: 'BET'; to: Chips }
-  | { type: 'RAISE'; to: Chips }
-  | { type: 'ALL_IN'; to: Chips }
+  | { type: "FOLD" }
+  | { type: "CHECK" }
+  | { type: "CALL"; to: Chips }
+  | { type: "BET"; to: Chips }
+  | { type: "RAISE"; to: Chips }
+  | { type: "ALL_IN"; to: Chips };
 ```
 
 数据库金额用 `Int` 即可覆盖当前娱乐局；若未来可能超过 21 亿筹码，迁移为 `BigInt`。领域层所有运算必须检查 `Number.isSafeInteger`。
@@ -39,64 +40,68 @@ type PlayerAction =
 
 画像分为四层：身份、静态版本、session 动态状态、actor-specific read。
 
+玩家名单不是代码常量。Z/J/L/H/P 作为数据库 seed 初始化，之后可通过管理页面新增任意熟人、停用玩家或创建新画像版本。所有历史手牌通过 `playerId + profileVersionId` 引用当时版本，因此玩家改名或调参不会改写历史。
+
+Hero 也保存一条 `Player(kind='HERO')` 身份记录，以统一 seat、event 和外键；Hero 不需要 AI 行为画像。不同对手眼中的 Hero 形象分别保存在 `OpponentRead`，不能合并成 Hero 自身的一份全局画像。
+
 ### 3.1 静态画像
 
 ```ts
 interface PlayerProfileParams {
   // Preflop
-  vpip: Probability
-  pfr: Probability
-  threeBetFrequency: Probability
-  fourBetFrequency: Probability
-  foldToThreeBet: Probability
-  callThreeBetFrequency: Probability
-  fourBetBluffFrequency: Probability
-  foldToFourBet: Probability
-  limpFrequency: Probability
-  coldCallFrequency: Probability
-  squeezeFrequency: Probability
+  vpip: Probability;
+  pfr: Probability;
+  threeBetFrequency: Probability;
+  fourBetFrequency: Probability;
+  foldToThreeBet: Probability;
+  callThreeBetFrequency: Probability;
+  fourBetBluffFrequency: Probability;
+  foldToFourBet: Probability;
+  limpFrequency: Probability;
+  coldCallFrequency: Probability;
+  squeezeFrequency: Probability;
 
   // Postflop
-  aggressionFactor: Probability
-  flopCbetFrequency: Probability
-  turnBarrelFrequency: Probability
-  riverBarrelFrequency: Probability
-  foldToBet: Probability
-  foldToRaise: Probability
-  drawChasing: Probability
-  topPairStickiness: Probability
-  middlePairStickiness: Probability
-  heroCallFrequency: Probability
-  bluffFrequency: Probability
-  semiBluffFrequency: Probability
-  largeBetBluffFrequency: Probability
-  overbetFrequency: Probability
-  allInBluffFrequency: Probability
-  slowPlayFrequency: Probability
-  trapFrequency: Probability
-  flopCheckRaiseFrequency: Probability
-  turnCheckRaiseFrequency: Probability
-  riverCheckRaiseFrequency: Probability
-  checkRaiseBluffFrequency: Probability
-  foldToCheckRaise: Probability
+  aggressionFactor: Probability;
+  flopCbetFrequency: Probability;
+  turnBarrelFrequency: Probability;
+  riverBarrelFrequency: Probability;
+  foldToBet: Probability;
+  foldToRaise: Probability;
+  drawChasing: Probability;
+  topPairStickiness: Probability;
+  middlePairStickiness: Probability;
+  heroCallFrequency: Probability;
+  bluffFrequency: Probability;
+  semiBluffFrequency: Probability;
+  largeBetBluffFrequency: Probability;
+  overbetFrequency: Probability;
+  allInBluffFrequency: Probability;
+  slowPlayFrequency: Probability;
+  trapFrequency: Probability;
+  flopCheckRaiseFrequency: Probability;
+  turnCheckRaiseFrequency: Probability;
+  riverCheckRaiseFrequency: Probability;
+  checkRaiseBluffFrequency: Probability;
+  foldToCheckRaise: Probability;
 
   // Mental tendencies
-  tiltSensitivity: Probability
-  lossChasing: Probability
-  riskTolerance: Probability
+  tiltSensitivity: Probability;
+  lossChasing: Probability;
+  riskTolerance: Probability;
 
-  tags: string[]
+  tags: string[];
 }
 
 interface ProfileVersion {
-  id: string
-  playerId: PlayerId
-  version: number
-  status: 'DRAFT' | 'ACTIVE' | 'RETIRED'
-  params: PlayerProfileParams
-  changeReason: string | null
-  basedOnFeedbackIds: string[]
-  createdAt: string
+  id: string;
+  playerId: PlayerId;
+  version: number;
+  status: "DRAFT" | "ACTIVE" | "RETIRED";
+  params: PlayerProfileParams;
+  changeReason: string | null;
+  basedOnFeedbackIds: string[];
+  createdAt: string;
 }
 ```
 
@@ -104,13 +109,13 @@ interface ProfileVersion {
 
 所有字段 V1 都提供显式默认值，避免 `undefined` 在 prior 中被误当 0。建议初值：
 
-| 玩家 | 画像方向 | 需要补齐的 V1 默认 |
-|---|---|---|
-| Z | 极松凶、追 draw、上头放大风险 | squeeze .18, cbet .72, turn .62, river .48, overbet .22 |
-| J | 松粘被动、对 Hero bluff-catch | squeeze .05, cbet .42, turn .30, river .22, overbet .08 |
-| L | 理性、有结构、非 solver | limp .12, cold call .28, squeeze .11, cbet .58, turn .46, river .38, overbet .13 |
-| P | 比 L 稳 | VPIP .30, PFR .21, 3bet .08, aggression .46, bluff .25, risk .40 |
-| H | 中等偏稳、信息不足 | VPIP .38, PFR .22, 3bet .07, aggression .43, bluff .22, risk .42 |
+| 玩家         | 画像方向                                                            | 需要补齐的 V1 默认                                                               |
+| ------------ | ------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| JL（原 Z）   | 极松、追 draw；pair+draw 偶发激进；连输/tilt 放大风险，水上相对理性 | squeeze .18, cbet .72, turn .62, river .48；正常状态突然大柱以价值为主           |
+| JJ（原 J）   | 松粘被动、中等牌力宽跟；大牌主动/慢打约各半                         | squeeze .05, cbet .42, turn .30, river .22, overbet .08                          |
+| 23（原 L）   | 理性、有结构、非 solver；不对 Hero 保持固定不信任                   | limp .12, cold call .28, squeeze .11, cbet .58, turn .46, river .38, overbet .13 |
+| 胖子（原 P） | 比 23 稳；面对 Hero 大柱时顶对仍偏跟                                | VPIP .30, PFR .21, 3bet .08, aggression .46, bluff .25, risk .40                 |
+| HG（原 H）   | 中等偏稳、信息不足；面对 Hero 大柱时顶对偏跟                        | VPIP .38, PFR .22, 3bet .07, aggression .43, bluff .22, risk .42                 |
 
 这些是启动先验，不是“真实结论”；必须可编辑、可版本化。
 
@@ -118,20 +123,20 @@ interface ProfileVersion {
 
 ```ts
 interface PlayerSessionState {
-  playerId: PlayerId
-  sessionId: string
-  stack: Chips
-  sessionProfitLoss: number
-  tiltLevel: Probability
-  confidenceLevel: Probability
-  recentLossCount: number
-  recentWinCount: number
-  recentlyCaughtBluffing: boolean
-  recentlyCaughtHeroBluffing: boolean
-  recentAggressionScore: Probability
-  recentHandsSummary: string[] // capped, e.g. last 10
-  rebuyCount: number
-  version: number
+  playerId: PlayerId;
+  sessionId: string;
+  stack: Chips;
+  sessionProfitLoss: number;
+  tiltLevel: Probability;
+  confidenceLevel: Probability;
+  recentLossCount: number;
+  recentWinCount: number;
+  recentlyCaughtBluffing: boolean;
+  recentlyCaughtHeroBluffing: boolean;
+  recentAggressionScore: Probability;
+  recentHandsSummary: string[]; // capped, e.g. last 10
+  rebuyCount: number;
+  version: number;
 }
 ```
 
@@ -143,17 +148,17 @@ interface PlayerSessionState {
 
 ```ts
 interface OpponentRead {
-  observerPlayerId: PlayerId
-  subjectPlayerId: PlayerId // V1 重点是 Hero
-  sessionId: string | null // null = 长期基础 read
-  perceivedLooseness: Probability
-  perceivedBluffFrequency: Probability
-  largeBetBluffReputation: Probability
-  heroCallReputation: Probability
-  aggressionReputation: Probability
-  confidence: Probability
-  evidenceCount: number
-  updatedAt: string
+  observerPlayerId: PlayerId;
+  subjectPlayerId: PlayerId; // V1 重点是 Hero
+  sessionId: string | null; // null = 长期基础 read
+  perceivedLooseness: Probability;
+  perceivedBluffFrequency: Probability;
+  largeBetBluffReputation: Probability;
+  heroCallReputation: Probability;
+  aggressionReputation: Probability;
+  confidence: Probability;
+  evidenceCount: number;
+  updatedAt: string;
 }
 ```
 
@@ -165,54 +170,61 @@ Session read 从长期 read 拷贝，依据公开 showdown 和近期行动做小
 
 ```ts
 interface GameState {
-  schemaVersion: 1
-  engineVersion: string
-  handId: HandId
-  sessionId: string
-  handNo: number
-  version: number
+  schemaVersion: 1;
+  engineVersion: string;
+  handId: HandId;
+  sessionId: string;
+  handNo: number;
+  version: number;
 
-  phase: 'HAND_SETUP' | 'POSTING_BLINDS' | 'BETTING' |
-    'DEALING' | 'SHOWDOWN' | 'SETTLEMENT' | 'COMPLETE' | 'FROZEN'
-  street: Street
-  buttonSeat: number
-  smallBlind: Chips
-  bigBlind: Chips
+  phase:
+    | "HAND_SETUP"
+    | "POSTING_BLINDS"
+    | "BETTING"
+    | "DEALING"
+    | "SHOWDOWN"
+    | "SETTLEMENT"
+    | "COMPLETE"
+    | "FROZEN";
+  street: Street;
+  buttonSeat: number;
+  smallBlind: Chips;
+  bigBlind: Chips;
 
-  seats: SeatState[]
-  board: Card[]
-  burnCards: Card[]
-  deck: Card[]
-  currentActorSeat: number | null
-  actionQueue: number[]
+  seats: SeatState[];
+  board: Card[];
+  burnCards: Card[];
+  deck: Card[];
+  currentActorSeat: number | null;
+  actionQueue: number[];
 
-  currentBet: Chips
-  lastFullRaiseSize: Chips
-  lastFullAggressorSeat: number | null
-  actedSinceLastFullRaise: number[]
-  streetContributions: Record<PlayerId, Chips>
-  totalContributions: Record<PlayerId, Chips>
-  pots: Pot[]
+  currentBet: Chips;
+  lastFullRaiseSize: Chips;
+  lastFullAggressorSeat: number | null;
+  actedSinceLastFullRaise: number[];
+  streetContributions: Record<PlayerId, Chips>;
+  totalContributions: Record<PlayerId, Chips>;
+  pots: Pot[];
 
-  eventsApplied: number
-  seedRef: string
+  eventsApplied: number;
+  seedRef: string;
 }
 
 interface SeatState {
-  seat: number
-  playerId: PlayerId
-  stack: Chips
-  holeCards: Card[] // only in server/private state
-  status: 'ACTIVE' | 'FOLDED' | 'ALL_IN' | 'SITTING_OUT'
-  committedThisStreet: Chips
-  committedThisHand: Chips
+  seat: number;
+  playerId: PlayerId;
+  stack: Chips;
+  holeCards: Card[]; // only in server/private state
+  status: "ACTIVE" | "FOLDED" | "ALL_IN" | "SITTING_OUT";
+  committedThisStreet: Chips;
+  committedThisHand: Chips;
 }
 
 interface Pot {
-  index: number
-  amount: Chips
-  eligiblePlayerIds: PlayerId[]
-  contributionCap: Chips
+  index: number;
+  amount: Chips;
+  eligiblePlayerIds: PlayerId[];
+  contributionCap: Chips;
 }
 ```
 
@@ -226,21 +238,21 @@ interface Pot {
 
 ```ts
 type DecisionSpot =
-  | 'OPEN_RAISE'
-  | 'THREE_BET'
-  | 'FOUR_BET'
-  | 'FIVE_BET_PLUS'
-  | 'SQUEEZE'
-  | 'LIMP_RERAISE'
-  | 'BACK_RAISE'
-  | 'CHECK_RAISE'
-  | 'RERAISE_POSTFLOP'
-  | 'CBET'
-  | 'DELAYED_CBET'
-  | 'DONK_BET'
-  | 'PROBE_BET'
-  | 'DOUBLE_BARREL'
-  | 'TRIPLE_BARREL'
+  | "OPEN_RAISE"
+  | "THREE_BET"
+  | "FOUR_BET"
+  | "FIVE_BET_PLUS"
+  | "SQUEEZE"
+  | "LIMP_RERAISE"
+  | "BACK_RAISE"
+  | "CHECK_RAISE"
+  | "RERAISE_POSTFLOP"
+  | "CBET"
+  | "DELAYED_CBET"
+  | "DONK_BET"
+  | "PROBE_BET"
+  | "DOUBLE_BARREL"
+  | "TRIPLE_BARREL";
 ```
 
 - Preflop 首次非盲注加注为 open raise；对其再加注为 3bet，再加注为 4bet，依次类推。
@@ -250,28 +262,34 @@ type DecisionSpot =
 - 每个 `HeroDecision` 和 `AiDecision` 保存推导出的 spot/version，保证复盘和统计口径可追踪。
 
 ```ts
-type TrainingMode = 'QUICK' | 'TRAINING' | 'DEEP'
-type RangeStrength = 'VERY_WEAK' | 'WEAK' | 'MEDIUM' | 'STRONG' | 'VERY_STRONG'
-type ActionPurpose = 'VALUE' | 'BLUFF' | 'SEMI_BLUFF' | 'PROTECTION' |
-  'DENY_EQUITY' | 'POT_CONTROL' | 'TRAP'
+type TrainingMode = "QUICK" | "TRAINING" | "DEEP";
+type RangeStrength = "VERY_WEAK" | "WEAK" | "MEDIUM" | "STRONG" | "VERY_STRONG";
+type ActionPurpose =
+  | "VALUE"
+  | "BLUFF"
+  | "SEMI_BLUFF"
+  | "PROTECTION"
+  | "DENY_EQUITY"
+  | "POT_CONTROL"
+  | "TRAP";
 
 interface HeroThoughtInput {
-  mode: TrainingMode
-  rangeStrength?: RangeStrength
-  purpose?: ActionPurpose
-  estimatedPotOdds?: Probability
-  estimatedEquity?: Probability
+  mode: TrainingMode;
+  rangeStrength?: RangeStrength;
+  purpose?: ActionPurpose;
+  estimatedPotOdds?: Probability;
+  estimatedEquity?: Probability;
 
-  rangeCategories?: string[]
-  possibleHands?: string[]
-  valueCombos?: number
-  bluffCombos?: number
-  blockers?: string[]
-  outs?: number
-  futureStreetPlan?: string
-  responseToRaise?: string
-  worseHandsThatCall?: string[]
-  betterHandsThatFold?: string[]
+  rangeCategories?: string[];
+  possibleHands?: string[];
+  valueCombos?: number;
+  bluffCombos?: number;
+  blockers?: string[];
+  outs?: number;
+  futureStreetPlan?: string;
+  responseToRaise?: string;
+  worseHandsThatCall?: string[];
+  betterHandsThatFold?: string[];
 }
 ```
 
@@ -284,51 +302,51 @@ interface HeroThoughtInput {
 
 ```ts
 interface DecisionRecord {
-  id: string
-  handId: HandId
-  eventNo: number
-  actorId: PlayerId
-  actorViewHash: string
-  priorJson: ActionPrior
-  legalActionsJson: LegalActionSet
-  selectedActionJson: PlayerAction
-  source: 'MODEL' | 'FALLBACK' | 'SCRIPTED'
-  modelProvider: string | null
-  modelName: string | null
-  temperature: number | null
-  promptVersion: string
-  profileVersionId: string
-  rawOutputRef: string | null
-  validationErrorsJson: unknown | null
-  latencyMs: number | null
-  rngSubseed: string
+  id: string;
+  handId: HandId;
+  eventNo: number;
+  actorId: PlayerId;
+  actorViewHash: string;
+  priorJson: ActionPrior;
+  legalActionsJson: LegalActionSet;
+  selectedActionJson: PlayerAction;
+  source: "MODEL" | "FALLBACK" | "SCRIPTED";
+  modelProvider: string | null;
+  modelName: string | null;
+  temperature: number | null;
+  promptVersion: string;
+  profileVersionId: string;
+  rawOutputRef: string | null;
+  validationErrorsJson: unknown | null;
+  latencyMs: number | null;
+  rngSubseed: string;
 }
 
 interface ReviewOutput {
-  overall: 'REASONABLE' | 'MARGINAL' | 'MISTAKE' | 'MAJOR_MISTAKE'
+  overall: "REASONABLE" | "MARGINAL" | "MISTAKE" | "MAJOR_MISTAKE";
   math: {
-    potOddsCorrect: boolean
-    actualPotOdds: Probability | null
-    heroEstimate: Probability | null
-    explanation: string
-  }
-  rangeReading: { score: number; mainIssue: string | null }
-  betPurpose: { correct: boolean; mainIssue: string | null }
+    potOddsCorrect: boolean;
+    actualPotOdds: Probability | null;
+    heroEstimate: Probability | null;
+    explanation: string;
+  };
+  rangeReading: { score: number; mainIssue: string | null };
+  betPurpose: { correct: boolean; mainIssue: string | null };
   decision: {
-    recommendedAction: 'FOLD'|'CHECK'|'CALL'|'BET'|'RAISE'|'ALL_IN'
-    recommendedSizingTo: Chips | null
-    confidence: Probability
-  }
+    recommendedAction: "FOLD" | "CHECK" | "CALL" | "BET" | "RAISE" | "ALL_IN";
+    recommendedSizingTo: Chips | null;
+    confidence: Probability;
+  };
   analysis: {
-    informationAtDecision: string
-    math: string
-    range: string
-    exploit: string
-    action: string
-    sizing: string
-    thinkingLeak: string
-  }
-  leakTags: LeakTag[]
+    informationAtDecision: string;
+    math: string;
+    range: string;
+    exploit: string;
+    action: string;
+    sizing: string;
+    thinkingLeak: string;
+  };
+  leakTags: LeakTag[];
 }
 ```
 
@@ -338,60 +356,76 @@ review 的 `actualPotOdds` 由程序注入，模型无权改写；若输出冲�
 
 ### 7.1 身份、画像与 session
 
-| 表 | 关键字段 | 约束/说明 |
-|---|---|---|
-| `Player` | id, name, kind, active | name unique；kind = HERO/AI |
-| `ProfileVersion` | id, playerId, version, paramsJson, status | unique(playerId, version)；每人最多一个 ACTIVE |
-| `OpponentRead` | observerId, subjectId, sessionId, metricsJson | unique(observerId, subjectId, sessionId) |
-| `Session` | id, status, settingsJson, seed, startedAt, endedAt | settings 含盲注/人数/rebuy/mode |
-| `SessionSeat` | sessionId, seatNo, playerId, initialStack | unique(sessionId, seatNo/playerId) |
-| `PlayerSessionState` | sessionId, playerId, stateJson, version | 乐观锁 |
-| `Rebuy` | id, sessionId, playerId, handNo, ordinal, amount | 只能发生在 hand 间；ordinal 驱动规则 |
+| 表                   | 关键字段                                                     | 约束/说明                                                                        |
+| -------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| `Player`             | id, name, displayName, kind, active, sortOrder, metadataJson | name unique；kind = HERO/AI；AI 表示由决策管线控制的熟人角色，不限定为 Z/J/L/H/P |
+| `ProfileVersion`     | id, playerId, version, paramsJson, status                    | unique(playerId, version)；每人最多一个 ACTIVE                                   |
+| `OpponentRead`       | observerId, subjectId, sessionId, metricsJson                | unique(observerId, subjectId, sessionId)                                         |
+| `Session`            | id, status, settingsJson, seed, startedAt, endedAt           | settings 含盲注/人数/rebuy/mode                                                  |
+| `SessionSeat`        | sessionId, seatNo, playerId, initialStack                    | unique(sessionId, seatNo/playerId)                                               |
+| `PlayerSessionState` | sessionId, playerId, stateJson, version                      | 乐观锁                                                                           |
+| `Rebuy`              | id, sessionId, playerId, handNo, ordinal, amount             | 只能发生在 hand 间；ordinal 驱动规则                                             |
 
 ### 7.2 手牌、事件和快照
 
-| 表 | 关键字段 | 约束/说明 |
-|---|---|---|
-| `Hand` | id, sessionId, handNo, seed, engineVersion, status, buttonSeat, stateHash | unique(sessionId, handNo) |
-| `HandParticipant` | handId, playerId, seatNo, startingStack, endingStack, profileVersionId | 一手使用固定画像版本 |
-| `HandEvent` | id, handId, seq, type, publicPayloadJson, privatePayloadRef, commandId | unique(handId, seq), unique(commandId) |
-| `HandSnapshot` | id, handId, eventSeq, schemaVersion, stateJson, stateHash | unique(handId, eventSeq) |
-| `CommandReceipt` | commandId, handId, expectedVersion, resultEventFrom/To | 幂等回执 |
-| `AiDecision` | 见 DecisionRecord | unique(handId, eventNo, actorId) |
+| 表                | 关键字段                                                                  | 约束/说明                              |
+| ----------------- | ------------------------------------------------------------------------- | -------------------------------------- |
+| `Hand`            | id, sessionId, handNo, seed, engineVersion, status, buttonSeat, stateHash | unique(sessionId, handNo)              |
+| `HandParticipant` | handId, playerId, seatNo, startingStack, endingStack, profileVersionId    | 一手使用固定画像版本                   |
+| `HandEvent`       | id, handId, seq, type, publicPayloadJson, privatePayloadRef, commandId    | unique(handId, seq), unique(commandId) |
+| `HandSnapshot`    | id, handId, eventSeq, schemaVersion, stateJson, stateHash                 | unique(handId, eventSeq)               |
+| `CommandReceipt`  | commandId, handId, expectedVersion, resultEventFrom/To                    | 幂等回执                               |
+| `AiDecision`      | 见 DecisionRecord                                                         | unique(handId, eventNo, actorId)       |
 
 私有牌可在单机 V1 存数据库受限 JSON；接口层必须隔离。若上线多用户，升级为应用层加密并将 key 放到数据库之外。
 
 ### 7.3 训练、复盘和 leak
 
-| 表 | 关键字段 | 说明 |
-|---|---|---|
-| `HeroDecision` | id, handId, eventNo, thoughtJson, actionJson, legalContextJson | 保存决策时快照，不能事后覆盖 |
-| `HandReview` | id, handId, status, reviewJson, reviewerProvider/model, promptVersion, inputHash | 可多次生成；标记 active 版本 |
-| `DecisionReview` | reviewId, heroDecisionId, reviewJson | 每个 Hero 决策独立评价 |
-| `LeakOccurrence` | id, reviewId, decisionId, tag, street, opponentId, estimatedEvLoss, confidence | Dashboard 的原子事实 |
-| `LeakAggregate` | ownerId, tag, window, metricsJson, calculatedAt | 可重建缓存，不是事实源 |
+| 表               | 关键字段                                                                         | 说明                         |
+| ---------------- | -------------------------------------------------------------------------------- | ---------------------------- |
+| `HeroDecision`   | id, handId, eventNo, thoughtJson, actionJson, legalContextJson                   | 保存决策时快照，不能事后覆盖 |
+| `HandReview`     | id, handId, status, reviewJson, reviewerProvider/model, promptVersion, inputHash | 可多次生成；标记 active 版本 |
+| `DecisionReview` | reviewId, heroDecisionId, reviewJson                                             | 每个 Hero 决策独立评价       |
+| `LeakOccurrence` | id, reviewId, decisionId, tag, street, opponentId, estimatedEvLoss, confidence   | Dashboard 的原子事实         |
+| `LeakAggregate`  | ownerId, tag, window, metricsJson, calculatedAt                                  | 可重建缓存，不是事实源       |
 
 `estimatedEvLoss` V1 可为空；没有可靠 range/equity 模型时不能让 LLM 伪造精确 EV。允许保存区间或低置信度估算：
 
 ```ts
 interface EvLossEstimate {
-  min: number
-  max: number
-  unit: 'CHIPS' | 'BB'
-  confidence: Probability
-  method: 'RULE_BASED' | 'MONTE_CARLO' | 'REVIEW_ESTIMATE'
+  min: number;
+  max: number;
+  unit: "CHIPS" | "BB";
+  confidence: Probability;
+  method: "RULE_BASED" | "MONTE_CARLO" | "REVIEW_ESTIMATE";
 }
 ```
 
 ### 7.4 画像反馈和真实牌例
 
-| 表 | 关键字段 | 说明 |
-|---|---|---|
-| `ProfileFeedback` | id, handId, decisionId, playerId, sentiment, correctionText, observedActionJson | LIKE_PLAYER / UNLIKE_PLAYER / CORRECTION |
-| `ProfileAdjustmentSuggestion` | id, playerId, baseVersionId, patchJson, evidenceJson, status | PENDING/ACCEPTED/REJECTED；不自动发布 |
-| `RealHand` | id, source, status, rawText, normalizedJson, validationJson | DRAFT_INVALID/VALIDATED/ARCHIVED |
-| `RegressionCase` | id, realHandId, actorId, targetDecisionJson, toleranceJson, active | 校验目标是概率/动作可达性，不要求每次同动作 |
-| `RegressionRun` | id, caseId, engineVersion, promptVersion, profileVersionId, resultJson | 比较版本变化 |
+| 表                            | 关键字段                                                                        | 说明                                        |
+| ----------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------- |
+| `ProfileFeedback`             | id, handId, decisionId, playerId, sentiment, correctionText, observedActionJson | LIKE_PLAYER / UNLIKE_PLAYER / CORRECTION    |
+| `ProfileAdjustmentSuggestion` | id, playerId, baseVersionId, patchJson, evidenceJson, status                    | PENDING/ACCEPTED/REJECTED；不自动发布       |
+| `RealHand`                    | id, source, status, rawText, normalizedJson, validationJson                     | DRAFT_INVALID/VALIDATED/ARCHIVED            |
+| `RegressionCase`              | id, realHandId, actorId, targetDecisionJson, toleranceJson, active              | 校验目标是概率/动作可达性，不要求每次同动作 |
+| `RegressionRun`               | id, caseId, engineVersion, promptVersion, profileVersionId, resultJson          | 比较版本变化                                |
+
+### 7.5 对局日志与分析的持久化范围
+
+| 数据                                                       | 存储位置                          | 性质           |
+| ---------------------------------------------------------- | --------------------------------- | -------------- |
+| 一场 session 的设置、seed、座位和 rebuy                    | `Session`, `SessionSeat`, `Rebuy` | 事实源         |
+| 每手起始/结束筹码、button、参与者和版本                    | `Hand`, `HandParticipant`         | 事实源         |
+| fold/check/call/bet/raise/all-in、发牌、换街、派奖         | `HandEvent`                       | 追加写事实源   |
+| Hero 当时填写的范围、赔率、equity、目的和计划              | `HeroDecision`                    | 不可变事实源   |
+| AI prior、合法动作、选中动作、模型和 Prompt 版本、fallback | `AiDecision`                      | 审计事实源     |
+| 牌后结构化分析与每个决策评价                               | `HandReview`, `DecisionReview`    | 版本化分析记录 |
+| 每次错误标签、街道、对手和 EV 区间                         | `LeakOccurrence`                  | 分析事实       |
+| Dashboard 汇总、趋势和窗口统计                             | `LeakAggregate`                   | 可重建缓存     |
+| 牌局快速恢复状态                                           | `HandSnapshot`                    | 可重建缓存     |
+
+因此页面刷新、服务重启或模型升级后，对局可以恢复，旧分析可以追踪，新版本分析也可以并存。报表口径升级时只重建 aggregate，不改写原始事件或 Hero 当时的输入。
 
 ## 8. 推荐索引
 
@@ -407,7 +441,7 @@ ProfileFeedback(playerId, createdAt)
 RealHand(status, createdAt)
 ```
 
-SQLite 开启 foreign keys 与 WAL；写操作保持短事务。迁移 PostgreSQL 时保留 ID、枚举字符串、JSON schema version 和唯一约束。
+MySQL 8 使用 InnoDB 与 `utf8mb4`；所有外键列建立索引，写操作保持短事务，并保留 ID、JSON schema version 和幂等唯一约束。
 
 ## 9. 版本与删除策略
 
@@ -429,4 +463,3 @@ SQLite 开启 foreign keys 与 WAL；写操作保持短事务。迁移 PostgreSQ
 - profile patch 只能触及白名单参数。
 - leak tag 来自版本化 taxonomy。
 - raw AI output 绝不直接写入权威 state。
-
