@@ -20,7 +20,7 @@ export function PlayerSeat({ seat }: { seat: SeatData }) {
           {seat.status}
         </span>
       )}
-      {seat.hero && <span className="turn-token">行动中</span>}
+      {seat.hero && seat.active && <span className="turn-token">行动中</span>}
     </div>
   )
 }

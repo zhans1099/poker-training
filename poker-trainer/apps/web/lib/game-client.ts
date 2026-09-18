@@ -1,10 +1,18 @@
 import {
   heroHandResponseSchema,
+  handReviewListResponseSchema,
+  handReviewResponseSchema,
+  leakDashboardResponseSchema,
+  profileFeedbackListResponseSchema,
+  profileFeedbackResponseSchema,
   createSessionResponseSchema,
   playerListResponseSchema,
   submitHandActionResponseSchema,
   type CreateTrainingSessionInput,
   type HeroHandView,
+  type HandReviewRecord,
+  type LeakDashboardItem,
+  type ProfileFeedbackRecord,
   type PlayerListItem,
   type SubmitHandActionInput,
 } from '@poker-trainer/schemas'
@@ -37,6 +45,65 @@ async function responseJson(response: Response): Promise<unknown> {
     throw new Error(message)
   }
   return body
+}
+
+export async function fetchHandReviews(
+  handId: string,
+  signal?: AbortSignal,
+): Promise<HandReviewRecord[]> {
+  const response = await fetch(
+    `/api/hands/${encodeURIComponent(handId)}/reviews`,
+    signal === undefined ? undefined : { signal },
+  )
+  return handReviewListResponseSchema.parse(await responseJson(response)).data
+}
+
+export async function createHandReview(
+  handId: string,
+): Promise<HandReviewRecord> {
+  const response = await fetch(
+    `/api/hands/${encodeURIComponent(handId)}/reviews`,
+    { method: 'POST' },
+  )
+  return handReviewResponseSchema.parse(await responseJson(response)).data
+}
+
+export async function fetchHandProfileFeedback(
+  handId: string,
+  signal?: AbortSignal,
+): Promise<ProfileFeedbackRecord[]> {
+  const response = await fetch(
+    `/api/hands/${encodeURIComponent(handId)}/profile-feedback`,
+    signal === undefined ? undefined : { signal },
+  )
+  return profileFeedbackListResponseSchema.parse(await responseJson(response))
+    .data
+}
+
+export async function resolveProfileFeedback(
+  playerId: string,
+  feedbackId: string,
+  resolution: 'ACCEPT' | 'REJECT',
+): Promise<ProfileFeedbackRecord> {
+  const response = await fetch(
+    `/api/players/${encodeURIComponent(playerId)}/profile-feedback/${encodeURIComponent(feedbackId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ resolution }),
+    },
+  )
+  return profileFeedbackResponseSchema.parse(await responseJson(response)).data
+}
+
+export async function fetchLeakDashboard(
+  signal?: AbortSignal,
+): Promise<LeakDashboardItem[]> {
+  const response = await fetch(
+    '/api/leaks',
+    signal === undefined ? undefined : { signal },
+  )
+  return leakDashboardResponseSchema.parse(await responseJson(response)).data
 }
 
 export async function fetchPlayers(
@@ -101,4 +168,19 @@ export async function submitHeroAction(
   )
   return submitHandActionResponseSchema.parse(await responseJson(response)).data
     .hand
+}
+
+export async function createNextHand(
+  handId: string,
+  randomizeSeats: boolean,
+): Promise<HeroHandView> {
+  const response = await fetch(
+    `/api/hands/${encodeURIComponent(handId)}/next`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ randomizeSeats }),
+    },
+  )
+  return heroHandResponseSchema.parse(await responseJson(response)).data
 }

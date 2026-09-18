@@ -9,6 +9,10 @@ export class ProfileVersionConflictError extends Error {
   override readonly name = 'ProfileVersionConflictError'
 }
 
+export class ProfileFeedbackConflictError extends Error {
+  override readonly name = 'ProfileFeedbackConflictError'
+}
+
 export interface CreateFeedbackRecord {
   handId?: string | undefined
   sourceHandRef?: string | undefined
@@ -27,6 +31,19 @@ export interface CreateProfileVersionRecord {
   expectedActiveVersionId?: string | null | undefined
   feedbackIds: string[]
   activate: boolean
+}
+
+export function appendProfileObservation(
+  profile: Record<string, unknown>,
+  observation: string,
+) {
+  const existingNotes = typeof profile.notes === 'string' ? profile.notes : ''
+  return {
+    ...profile,
+    notes: [existingNotes, `【复盘校准】${observation}`]
+      .filter(Boolean)
+      .join('\n'),
+  }
 }
 
 export class ProfileRepository {
@@ -60,6 +77,116 @@ export class ProfileRepository {
           : { proposedPatch: input.proposedPatch as Prisma.InputJsonValue }),
       },
     })
+  }
+
+  async createReviewFeedbacks(
+    handId: string,
+    sourceHandRef: string,
+    observations: Array<{
+      playerId: string
+      observation: string
+      confidence: number
+    }>,
+  ) {
+    if (observations.length === 0) return []
+    return getPrisma().$transaction(
+      observations.map((observation) =>
+        getPrisma().profileFeedback.create({
+          data: {
+            handId,
+            sourceHandRef,
+            playerId: observation.playerId,
+            sentiment: 'LIKE_PLAYER',
+            trait: 'deepseek-hand-observation',
+            observation: observation.observation,
+            confidence: observation.confidence,
+          },
+        }),
+      ),
+    )
+  }
+
+  async listHandFeedback(handId: string) {
+    return getPrisma().profileFeedback.findMany({
+      where: { handId },
+      include: {
+        player: { select: { id: true, code: true, displayName: true } },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    })
+  }
+
+  async resolveFeedback(
+    playerId: string,
+    feedbackId: string,
+    resolution: 'ACCEPT' | 'REJECT',
+  ) {
+    const prisma = getPrisma()
+    return prisma.$transaction(
+      async (transaction) => {
+        const feedback = await transaction.profileFeedback.findFirst({
+          where: { id: feedbackId, playerId },
+        })
+        if (!feedback) throw new PlayerNotFoundError('Feedback not found')
+        if (feedback.status !== 'PENDING') {
+          throw new ProfileFeedbackConflictError('Feedback is already resolved')
+        }
+
+        if (resolution === 'REJECT') {
+          return transaction.profileFeedback.update({
+            where: { id: feedback.id },
+            data: { status: 'REJECTED', resolvedAt: new Date() },
+          })
+        }
+
+        const player = await transaction.player.findUnique({
+          where: { id: playerId },
+          include: { activeProfileVersion: true },
+        })
+        if (!player?.activeProfileVersion) {
+          throw new PlayerNotFoundError('Player profile not found')
+        }
+        const currentProfile = player.activeProfileVersion.profile
+        if (
+          typeof currentProfile !== 'object' ||
+          currentProfile === null ||
+          Array.isArray(currentProfile)
+        ) {
+          throw new ProfileVersionConflictError('Active profile is invalid')
+        }
+        const latest = await transaction.profileVersion.findFirst({
+          where: { playerId },
+          orderBy: { version: 'desc' },
+          select: { version: true },
+        })
+        const profile = appendProfileObservation(
+          currentProfile,
+          feedback.observation,
+        )
+        const profileVersion = await transaction.profileVersion.create({
+          data: {
+            playerId,
+            version: (latest?.version ?? 0) + 1,
+            label: '复盘反馈确认',
+            source: 'USER_CONFIRMED',
+            profile,
+          },
+        })
+        await transaction.player.update({
+          where: { id: playerId },
+          data: { activeProfileVersionId: profileVersion.id },
+        })
+        return transaction.profileFeedback.update({
+          where: { id: feedback.id },
+          data: {
+            status: 'ACCEPTED',
+            appliedProfileVersionId: profileVersion.id,
+            resolvedAt: new Date(),
+          },
+        })
+      },
+      { isolationLevel: 'Serializable' },
+    )
   }
 
   async createVersion(playerId: string, input: CreateProfileVersionRecord) {

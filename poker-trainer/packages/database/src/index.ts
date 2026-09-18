@@ -5,7 +5,9 @@ export type {
   UpdatePlayerRecord,
 } from './player-repository'
 export {
+  appendProfileObservation,
   PlayerNotFoundError,
+  ProfileFeedbackConflictError,
   ProfileRepository,
   ProfileVersionConflictError,
 } from './profile-repository'
@@ -14,6 +16,7 @@ export type {
   CreateProfileVersionRecord,
 } from './profile-repository'
 export { OpponentReadRepository } from './opponent-read-repository'
+export { LeakRepository } from './leak-repository'
 export type { UpsertOpponentReadRecord } from './opponent-read-repository'
 export {
   GameRepository,
@@ -27,5 +30,6 @@ export {
 export type {
   AppendHandEventRecord,
   CreateHandRecord,
+  CreateHandReviewRecord,
   CreateTrainingSessionRecord,
 } from './game-repository'

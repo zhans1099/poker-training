@@ -5,6 +5,12 @@ import './globals.css'
 export const metadata: Metadata = {
   title: '德州决策训练',
   description: '固定熟人德州扑克决策训练器',
+  robots: {
+    index: false,
+    follow: false,
+    nocache: true,
+    googleBot: { index: false, follow: false, noimageindex: true },
+  },
 }
 
 export default function RootLayout({

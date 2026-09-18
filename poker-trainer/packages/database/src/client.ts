@@ -46,8 +46,6 @@ const globalDatabase = globalThis as typeof globalThis & {
 }
 
 export function getPrisma() {
-  const client = globalDatabase.pokerTrainerPrisma ?? createClient()
-  if (process.env.NODE_ENV !== 'production')
-    globalDatabase.pokerTrainerPrisma = client
-  return client
+  globalDatabase.pokerTrainerPrisma ??= createClient()
+  return globalDatabase.pokerTrainerPrisma
 }

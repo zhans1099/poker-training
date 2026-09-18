@@ -72,11 +72,25 @@ export interface AppendHandEventRecord {
     | {
         playerId: string
         profileVersionId: string
+        provider: string
+        model: string
+        source: 'PRIOR' | 'LLM' | 'FALLBACK'
+        promptVersion: string
         actorView: Record<string, unknown>
         output: Record<string, unknown>
         validation?: Record<string, unknown> | undefined
+        latencyMs?: number | undefined
+        inputTokens?: number | undefined
+        outputTokens?: number | undefined
       }
     | undefined
+}
+
+export interface CreateHandReviewRecord {
+  provider: string
+  model: string
+  promptVersion: string
+  review: Record<string, unknown>
 }
 
 const sessionInclude = {
@@ -196,6 +210,55 @@ export class GameRepository {
     })
   }
 
+  async findHandByNumber(sessionId: string, handNo: number) {
+    return getPrisma().hand.findUnique({
+      where: { sessionId_handNo: { sessionId, handNo } },
+      include: handInclude,
+    })
+  }
+
+  async findHandForReview(id: string) {
+    return getPrisma().hand.findUnique({
+      where: { id },
+      include: {
+        ...handInclude,
+        decisions: { orderBy: { eventSequence: 'asc' } },
+        reviews: { orderBy: { version: 'desc' } },
+      },
+    })
+  }
+
+  async createHandReview(handId: string, input: CreateHandReviewRecord) {
+    return getPrisma().$transaction(
+      async (transaction) => {
+        const hand = await transaction.hand.findUnique({
+          where: { id: handId },
+          select: { status: true },
+        })
+        if (!hand) throw new HandNotFoundError('Hand not found')
+        if (hand.status !== 'COMPLETED') {
+          throw new HandStateError('Only a completed hand can be reviewed')
+        }
+        const latest = await transaction.handReview.findFirst({
+          where: { handId },
+          select: { version: true },
+          orderBy: { version: 'desc' },
+        })
+        return transaction.handReview.create({
+          data: {
+            handId,
+            version: (latest?.version ?? 0) + 1,
+            provider: input.provider,
+            model: input.model,
+            promptVersion: input.promptVersion,
+            review: input.review as Prisma.InputJsonValue,
+          },
+        })
+      },
+      { isolationLevel: 'Serializable' },
+    )
+  }
+
   async findEventByCommand(handId: string, commandId: string) {
     return getPrisma().handEvent.findUnique({
       where: { handId_commandId: { handId, commandId } },
@@ -204,81 +267,98 @@ export class GameRepository {
 
   async createHand(sessionId: string, input: CreateHandRecord) {
     const prisma = getPrisma()
-    return prisma.$transaction(
-      async (transaction) => {
-        const session = await transaction.trainingSession.findUnique({
-          where: { id: sessionId },
-          include: sessionInclude,
-        })
-        if (!session) throw new SessionNotFoundError('Session not found')
-        if (session.status !== 'ACTIVE') {
-          throw new SessionStateError('Session is not active')
-        }
-        if (
-          !session.participants.some(
-            (participant) => participant.seatNo === input.buttonSeat,
-          )
-        ) {
-          throw new ParticipantValidationError(
-            'buttonSeat must belong to a session participant',
-          )
-        }
-        if (
-          session.participants.some(
-            (participant) => participant.player.activeProfileVersionId === null,
-          )
-        ) {
-          throw new ParticipantValidationError(
-            'Every participant must have an active profile version',
-          )
-        }
+    try {
+      return await prisma.$transaction(
+        async (transaction) => {
+          const session = await transaction.trainingSession.findUnique({
+            where: { id: sessionId },
+            include: sessionInclude,
+          })
+          if (!session) throw new SessionNotFoundError('Session not found')
+          if (session.status !== 'ACTIVE') {
+            throw new SessionStateError('Session is not active')
+          }
+          if (
+            !session.participants.some(
+              (participant) => participant.seatNo === input.buttonSeat,
+            )
+          ) {
+            throw new ParticipantValidationError(
+              'buttonSeat must belong to a session participant',
+            )
+          }
+          if (
+            session.participants.some(
+              (participant) =>
+                participant.player.activeProfileVersionId === null,
+            )
+          ) {
+            throw new ParticipantValidationError(
+              'Every participant must have an active profile version',
+            )
+          }
 
-        const latestHand = await transaction.hand.findFirst({
-          where: { sessionId },
-          select: { handNo: true, status: true },
-          orderBy: { handNo: 'desc' },
-        })
-        if (latestHand !== null && latestHand.status !== 'COMPLETED') {
-          throw new SessionStateError(
-            'The previous hand must be completed before starting another',
-          )
-        }
+          const latestHand = await transaction.hand.findFirst({
+            where: { sessionId },
+            select: { handNo: true, status: true },
+            orderBy: { handNo: 'desc' },
+          })
+          if (latestHand !== null && latestHand.status !== 'COMPLETED') {
+            throw new SessionStateError(
+              'The previous hand must be completed before starting another',
+            )
+          }
 
-        return transaction.hand.create({
-          data: {
-            sessionId,
-            handNo: (latestHand?.handNo ?? 0) + 1,
-            seedHash: input.seedHash,
-            buttonSeat: input.buttonSeat,
-            version: 1,
-            stateHash: input.stateHash,
-            state: input.state as Prisma.InputJsonValue,
-            participants: {
-              create: session.participants.map((participant) => ({
-                playerId: participant.playerId,
-                profileVersionId: participant.player
-                  .activeProfileVersionId as string,
-                seatNo:
-                  input.seatNoByPlayerId[participant.playerId] ??
-                  participant.seatNo,
-                startingStack: participant.stack,
-                holeCards:
-                  input.holeCardsByPlayerId[participant.playerId] ?? [],
-              })),
-            },
-            events: {
-              create: {
-                sequenceNo: 1,
-                eventType: 'HAND_STARTED',
-                payload: input.initialEventPayload as Prisma.InputJsonValue,
+          return transaction.hand.create({
+            data: {
+              sessionId,
+              handNo: (latestHand?.handNo ?? 0) + 1,
+              seedHash: input.seedHash,
+              buttonSeat: input.buttonSeat,
+              version: 1,
+              stateHash: input.stateHash,
+              state: input.state as Prisma.InputJsonValue,
+              participants: {
+                create: session.participants.map((participant) => ({
+                  playerId: participant.playerId,
+                  profileVersionId: participant.player
+                    .activeProfileVersionId as string,
+                  seatNo:
+                    input.seatNoByPlayerId[participant.playerId] ??
+                    participant.seatNo,
+                  startingStack: participant.stack,
+                  holeCards:
+                    input.holeCardsByPlayerId[participant.playerId] ?? [],
+                })),
+              },
+              events: {
+                create: {
+                  sequenceNo: 1,
+                  eventType: 'HAND_STARTED',
+                  payload: input.initialEventPayload as Prisma.InputJsonValue,
+                },
               },
             },
-          },
-          include: handInclude,
-        })
-      },
-      { isolationLevel: 'Serializable' },
-    )
+            include: handInclude,
+          })
+        },
+        { isolationLevel: 'Serializable' },
+      )
+    } catch (error) {
+      const code =
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        typeof error.code === 'string'
+          ? error.code
+          : null
+      if (code === 'P2002' || code === 'P2034') {
+        throw new SessionStateError(
+          'Another request created or is creating the next hand',
+        )
+      }
+      throw error
+    }
   }
 
   async appendEvent(handId: string, input: AppendHandEventRecord) {
@@ -383,10 +463,10 @@ export class GameRepository {
               playerId: input.aiDecision.playerId,
               profileVersionId: input.aiDecision.profileVersionId,
               eventSequence: nextVersion,
-              provider: 'prior',
-              model: 'persona-prior-v1',
-              source: 'PRIOR',
-              promptVersion: 'prior-v1',
+              provider: input.aiDecision.provider,
+              model: input.aiDecision.model,
+              source: input.aiDecision.source,
+              promptVersion: input.aiDecision.promptVersion,
               actorView: input.aiDecision.actorView as Prisma.InputJsonValue,
               output: input.aiDecision.output as Prisma.InputJsonValue,
               ...(input.aiDecision.validation === undefined
@@ -395,6 +475,15 @@ export class GameRepository {
                     validation: input.aiDecision
                       .validation as Prisma.InputJsonValue,
                   }),
+              ...(input.aiDecision.latencyMs === undefined
+                ? {}
+                : { latencyMs: input.aiDecision.latencyMs }),
+              ...(input.aiDecision.inputTokens === undefined
+                ? {}
+                : { inputTokens: input.aiDecision.inputTokens }),
+              ...(input.aiDecision.outputTokens === undefined
+                ? {}
+                : { outputTokens: input.aiDecision.outputTokens }),
             },
           })
         }

@@ -8,8 +8,6 @@ CREATE DATABASE IF NOT EXISTS `poker_trainer`
 
 USE `poker_trainer`;
 SET NAMES utf8mb4;
-Loaded Prisma config from prisma.config.ts.
-
 -- CreateTable
 CREATE TABLE `players` (
     `id` VARCHAR(30) NOT NULL,
@@ -316,4 +314,3 @@ ALTER TABLE `profile_feedback` ADD CONSTRAINT `profile_feedback_hand_id_fkey` FO
 
 -- AddForeignKey
 ALTER TABLE `profile_feedback` ADD CONSTRAINT `profile_feedback_applied_profile_version_id_fkey` FOREIGN KEY (`applied_profile_version_id`) REFERENCES `profile_versions`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
-

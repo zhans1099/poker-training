@@ -16,11 +16,19 @@ import {
   randomizeOpponentSeats,
   type ActionEvent,
 } from '../../lib/demo-hand'
-import { fetchHeroHand, submitHeroAction } from '../../lib/game-client'
+import {
+  createNextHand,
+  fetchHeroHand,
+  submitHeroAction,
+} from '../../lib/game-client'
 import { liveActions, liveSeats, toCardData } from '../../lib/live-hand-view'
 import { ActionTimeline } from './action-timeline'
 import { DecisionPanel } from './decision-panel'
 import { HistoryIcon, SettingsIcon, UserIcon } from './icons'
+import { HandReviewPanel } from './hand-review-panel'
+import { LeakDashboard } from './leak-dashboard'
+import { NextHandPanel } from './next-hand-panel'
+import { ProfileFeedbackPanel } from './profile-feedback-panel'
 import { TableCanvas } from './table-canvas'
 
 const demoLegalActions: LegalActionSet = {
@@ -87,13 +95,15 @@ function actionPresentation(action: PlayerActionInput) {
 }
 
 export function PokerTableScreen({ handId }: { handId?: string }) {
+  const [activeHandId, setActiveHandId] = useState(handId)
   const [demoActions, setDemoActions] = useState<ActionEvent[]>(initialActions)
   const [demoSeatState, setDemoSeatState] = useState(() => demoSeats)
   const [liveHand, setLiveHand] = useState<HeroHandView | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(handId !== undefined)
+  const [loading, setLoading] = useState(activeHandId !== undefined)
   const [submitting, setSubmitting] = useState(false)
   const [timelineOpen, setTimelineOpen] = useState(false)
+  const [profileFeedbackRefreshKey, setProfileFeedbackRefreshKey] = useState(0)
   const [betTo, setBetTo] = useState(760)
   const [selectedAction, setSelectedAction] = useState<
     PlayerActionInput['type'] | null
@@ -101,11 +111,11 @@ export function PokerTableScreen({ handId }: { handId?: string }) {
   const [notice, setNotice] = useState<string | null>(null)
 
   useEffect(() => {
-    if (handId === undefined) return
+    if (activeHandId === undefined) return
     const controller = new AbortController()
     setLoading(true)
     setLoadError(null)
-    fetchHeroHand(handId, controller.signal)
+    fetchHeroHand(activeHandId, controller.signal)
       .then((hand) => {
         setLiveHand(hand)
         if (hand.view.legalActions !== null) {
@@ -123,7 +133,7 @@ export function PokerTableScreen({ handId }: { handId?: string }) {
         if (!controller.signal.aborted) setLoading(false)
       })
     return () => controller.abort()
-  }, [handId])
+  }, [activeHandId])
 
   const seats = useMemo(
     () => (liveHand === null ? demoSeatState : liveSeats(liveHand)),
@@ -147,7 +157,7 @@ export function PokerTableScreen({ handId }: { handId?: string }) {
   )
   const legalActions =
     liveHand?.view.legalActions ??
-    (handId === undefined ? demoLegalActions : unavailableActions)
+    (activeHandId === undefined ? demoLegalActions : unavailableActions)
   const pot = liveHand?.view.pot ?? 860
   const currentBet = liveHand?.view.currentBet ?? 320
   const streetLabel =
@@ -164,12 +174,12 @@ export function PokerTableScreen({ handId }: { handId?: string }) {
         ? presentation.label
         : `${presentation.label} ${presentation.amount.toLocaleString('en-US')}`
 
-    if (handId !== undefined) {
+    if (activeHandId !== undefined) {
       if (liveHand === null) return
       setSubmitting(true)
       setLoadError(null)
       try {
-        const nextHand = await submitHeroAction(handId, {
+        const nextHand = await submitHeroAction(activeHandId, {
           expectedVersion: liveHand.version,
           commandId: crypto.randomUUID().replaceAll('-', ''),
           action,
@@ -202,6 +212,36 @@ export function PokerTableScreen({ handId }: { handId?: string }) {
         tone: presentation.tone,
       },
     ])
+  }
+
+  async function startNextHand(randomizeSeats: boolean) {
+    if (activeHandId === undefined || liveHand?.status !== 'COMPLETED') return
+    setSubmitting(true)
+    setLoadError(null)
+    try {
+      const nextHand = await createNextHand(activeHandId, randomizeSeats)
+      setActiveHandId(nextHand.id)
+      setLiveHand(nextHand)
+      setSelectedAction(null)
+      setTimelineOpen(false)
+      setNotice(
+        randomizeSeats
+          ? `第 ${nextHand.handNo} 手牌已发出 · 座位已重新随机`
+          : `第 ${nextHand.handNo} 手牌已发出 · 庄位已顺延`,
+      )
+      if (nextHand.view.legalActions !== null) {
+        setBetTo(suggestedBetTo(nextHand.view.legalActions))
+      }
+      window.history.replaceState(
+        null,
+        '',
+        `/?handId=${encodeURIComponent(nextHand.id)}`,
+      )
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : '下一手创建失败')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -243,16 +283,19 @@ export function PokerTableScreen({ handId }: { handId?: string }) {
           >
             <SettingsIcon />
           </button>
-          <button
-            className="icon-button desktop-only"
-            type="button"
-            aria-label="个人中心"
-          >
-            <UserIcon />
-          </button>
+          <form action="/api/auth/logout" method="post">
+            <button
+              className="icon-button desktop-only"
+              type="submit"
+              aria-label="退出登录"
+              title="退出登录"
+            >
+              <UserIcon />
+            </button>
+          </form>
         </div>
       </header>
-      {handId !== undefined && (
+      {activeHandId !== undefined && (
         <div
           className={`live-state-banner ${loadError === null ? '' : 'error'}`}
           role={loadError === null ? 'status' : 'alert'}
@@ -260,7 +303,9 @@ export function PokerTableScreen({ handId }: { handId?: string }) {
           {loading
             ? '正在恢复真实手牌…'
             : loadError === null
-              ? `真实手牌 #${liveHand?.handNo ?? ''} · 数据已连接`
+              ? liveHand?.status === 'COMPLETED'
+                ? `真实手牌 #${liveHand.handNo} · 已完成并保存结算`
+                : `真实手牌 #${liveHand?.handNo ?? ''} · 数据已连接`
               : `真实手牌未载入：${loadError}`}
         </div>
       )}
@@ -272,7 +317,7 @@ export function PokerTableScreen({ handId }: { handId?: string }) {
             heroCards={heroCards}
             pot={pot}
             currentBet={currentBet}
-            canShuffleSeats={handId === undefined}
+            canShuffleSeats={activeHandId === undefined}
             onShuffleSeats={() =>
               setDemoSeatState((current) => randomizeOpponentSeats(current))
             }
@@ -289,18 +334,42 @@ export function PokerTableScreen({ handId }: { handId?: string }) {
               行动
             </button>
           </div>
-          <DecisionPanel
-            betTo={betTo}
-            selectedAction={selectedAction}
-            legalActions={legalActions}
-            streetLabel={streetLabel}
-            pot={pot}
-            submitting={
-              submitting || (handId !== undefined && liveHand === null)
-            }
-            onBetToChange={setBetTo}
-            onAction={recordAction}
-          />
+          {liveHand?.status === 'COMPLETED' ? (
+            <>
+              <NextHandPanel
+                handNo={liveHand.handNo}
+                fundedPlayerCount={
+                  liveHand.view.seats.filter((seat) => seat.stack > 0).length
+                }
+                submitting={submitting}
+                onStart={startNextHand}
+              />
+              <HandReviewPanel
+                handId={liveHand.id}
+                onFeedbackCreated={() =>
+                  setProfileFeedbackRefreshKey((current) => current + 1)
+                }
+              />
+              <ProfileFeedbackPanel
+                handId={liveHand.id}
+                refreshKey={profileFeedbackRefreshKey}
+              />
+              <LeakDashboard refreshKey={profileFeedbackRefreshKey} />
+            </>
+          ) : (
+            <DecisionPanel
+              betTo={betTo}
+              selectedAction={selectedAction}
+              legalActions={legalActions}
+              streetLabel={streetLabel}
+              pot={pot}
+              submitting={
+                submitting || (activeHandId !== undefined && liveHand === null)
+              }
+              onBetToChange={setBetTo}
+              onAction={recordAction}
+            />
+          )}
         </div>
         <ActionTimeline
           actions={actions}

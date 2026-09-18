@@ -4,21 +4,35 @@ import {
   HandNotFoundError,
   HandStateError,
   SessionNotFoundError,
+  SessionStateError,
 } from '@poker-trainer/database'
 import {
   applyPokerAction,
-  chooseProfileBotAction,
   createActorView,
   deriveSeed,
   randomizeTableSeats,
   startPokerHand,
   type PokerHandState,
 } from '@poker-trainer/poker-engine'
-import type { SubmitHandActionInput } from '@poker-trainer/schemas'
-import type { CreateHandInput } from '@poker-trainer/schemas'
+import type {
+  CreateHandInput,
+  CreateNextHandInput,
+  SubmitHandActionInput,
+} from '@poker-trainer/schemas'
+import { nextButtonPlayerId } from './next-hand'
+import { chooseAuditedPlayerAction } from './player-decision-provider'
 import { toPublicHandEvent } from './public-hand-event'
 
 type PrivateHand = NonNullable<Awaited<ReturnType<GameRepository['findHand']>>>
+type PrivateSession = NonNullable<
+  Awaited<ReturnType<GameRepository['findSession']>>
+>
+
+interface StartingPlayer {
+  seat: number
+  playerId: string
+  stack: number
+}
 
 function jsonRecord(value: object): Record<string, unknown> {
   return JSON.parse(JSON.stringify(value)) as Record<string, unknown>
@@ -73,6 +87,24 @@ function publicHand(hand: PrivateHand) {
 export class HandService {
   constructor(private readonly repository = new GameRepository()) {}
 
+  private async findSuccessorAfterConflict(
+    sessionId: string,
+    handNo: number,
+  ): Promise<PrivateHand | null> {
+    const retryDelays = [0, 25, 50, 100, 200]
+    for (const delayMs of retryDelays) {
+      if (delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs))
+      }
+      const successor = await this.repository.findHandByNumber(
+        sessionId,
+        handNo,
+      )
+      if (successor) return successor
+    }
+    return null
+  }
+
   async getForHero(handId: string) {
     const hand = await this.repository.findHand(handId)
     if (!hand) throw new HandNotFoundError('Hand not found')
@@ -82,19 +114,97 @@ export class HandService {
   async create(sessionId: string, input: CreateHandInput) {
     const session = await this.repository.findSession(sessionId)
     if (!session) throw new SessionNotFoundError('Session not found')
-
-    const seed = randomBytes(32).toString('hex')
     const originalPlayers = session.participants.map((participant) => ({
       seat: participant.seatNo,
       playerId: participant.playerId,
       stack: participant.stack,
     }))
+
+    return this.createForPlayers(session, originalPlayers, input)
+  }
+
+  async createNext(previousHandId: string, input: CreateNextHandInput) {
+    const previousHand = await this.repository.findHand(previousHandId)
+    if (!previousHand) throw new HandNotFoundError('Hand not found')
+    if (previousHand.status !== 'COMPLETED') {
+      throw new HandStateError(
+        'The current hand must be completed before starting the next hand',
+      )
+    }
+    const existingSuccessor = await this.repository.findHandByNumber(
+      previousHand.sessionId,
+      previousHand.handNo + 1,
+    )
+    if (existingSuccessor) return publicHand(existingSuccessor)
+    const session = await this.repository.findSession(previousHand.sessionId)
+    if (!session) throw new SessionNotFoundError('Session not found')
+
+    const settledPlayers = previousHand.participants.map((participant) => {
+      if (participant.endingStack === null) {
+        throw new HandStateError('Completed hand is missing ending stacks')
+      }
+      return {
+        seat: participant.seatNo,
+        playerId: participant.playerId,
+        stack: participant.endingStack,
+      }
+    })
+    let buttonPlayerId: string
+    try {
+      buttonPlayerId = nextButtonPlayerId(
+        previousHand.buttonSeat,
+        settledPlayers,
+      )
+    } catch (error) {
+      throw new HandStateError(
+        error instanceof Error ? error.message : 'Unable to rotate the button',
+      )
+    }
+
+    try {
+      return await this.createForPlayers(
+        session,
+        settledPlayers,
+        input,
+        buttonPlayerId,
+      )
+    } catch (error) {
+      if (
+        error instanceof SessionStateError ||
+        (error instanceof Error && error.name === 'SessionStateError')
+      ) {
+        const successor = await this.findSuccessorAfterConflict(
+          previousHand.sessionId,
+          previousHand.handNo + 1,
+        )
+        if (successor) return publicHand(successor)
+      }
+      throw error
+    }
+  }
+
+  private async createForPlayers(
+    session: PrivateSession,
+    originalPlayers: readonly StartingPlayer[],
+    input: CreateHandInput | CreateNextHandInput,
+    rotatingButtonPlayerId?: string,
+  ) {
+    const seed = randomBytes(32).toString('hex')
     const seatedPlayers = input.randomizeSeats
       ? randomizeTableSeats(originalPlayers, seed)
       : originalPlayers
+    const buttonSeat =
+      rotatingButtonPlayerId === undefined
+        ? (input as CreateHandInput).buttonSeat
+        : seatedPlayers.find(
+            (player) => player.playerId === rotatingButtonPlayerId,
+          )?.seat
+    if (buttonSeat === undefined) {
+      throw new HandStateError('Unable to determine the button seat')
+    }
     const state = startPokerHand({
       seed,
-      buttonSeat: input.buttonSeat,
+      buttonSeat,
       smallBlind: session.smallBlind,
       bigBlind: session.bigBlind,
       players: seatedPlayers,
@@ -105,16 +215,20 @@ export class HandService {
     const seatNoByPlayerId = Object.fromEntries(
       state.dealt.seats.map((seat) => [seat.playerId, seat.seat]),
     )
-    const hand = await this.repository.createHand(sessionId, {
-      buttonSeat: input.buttonSeat,
+    const hand = await this.repository.createHand(session.id, {
+      buttonSeat,
       seedHash: createHash('sha256').update(seed).digest('hex'),
       stateHash: stateHash(state),
       state: jsonRecord(state),
       holeCardsByPlayerId,
       seatNoByPlayerId,
       initialEventPayload: {
-        buttonSeat: input.buttonSeat,
-        seatingMode: input.randomizeSeats ? 'RANDOM' : 'SESSION_DEFAULT',
+        buttonSeat,
+        seatingMode: input.randomizeSeats
+          ? 'RANDOM'
+          : rotatingButtonPlayerId === undefined
+            ? 'SESSION_DEFAULT'
+            : 'PREVIOUS_HAND',
         seats: state.dealt.seats.map((seat) => ({
           seatNo: seat.seat,
           playerId: seat.playerId,
@@ -130,6 +244,13 @@ export class HandService {
   }
 
   private async advanceBots(handId: string): Promise<void> {
+    const configuredBudget = Number(
+      process.env.AI_PLAYER_MAX_LLM_DECISIONS_PER_TURN,
+    )
+    let remainingLlmDecisions =
+      Number.isSafeInteger(configuredBudget) && configuredBudget >= 0
+        ? configuredBudget
+        : 2
     for (let step = 0; step < 200; step += 1) {
       const hand = await this.repository.findHand(handId)
       if (!hand) throw new HandNotFoundError('Hand not found')
@@ -158,16 +279,29 @@ export class HandService {
         !Array.isArray(rawProfile)
           ? (rawProfile as Record<string, unknown>)
           : {}
-      const decision = chooseProfileBotAction({
-        state,
-        actorId: actor.playerId,
-        heroId: heroId(hand),
-        profile,
-        seed: deriveSeed(
-          state.dealt.seed,
-          `prior:${hand.version}:${actor.playerId}`,
-        ),
-      })
+      const decision = await chooseAuditedPlayerAction(
+        {
+          state,
+          actorId: actor.playerId,
+          heroId: heroId(hand),
+          profile,
+          seed: deriveSeed(
+            state.dealt.seed,
+            `prior:${hand.version}:${actor.playerId}`,
+          ),
+          actorView,
+          players: hand.participants.map((entry) => ({
+            playerId: entry.playerId,
+            displayName: entry.player.displayName,
+            kind: entry.player.kind,
+          })),
+          publicEvents: hand.events.map((event) =>
+            jsonRecord(toPublicHandEvent(event)),
+          ),
+        },
+        { allowLlm: remainingLlmDecisions > 0 },
+      )
+      if (decision.source !== 'PRIOR') remainingLlmDecisions -= 1
       const nextState = applyPokerAction(state, actor.playerId, decision.action)
       const handStatus =
         nextState.phase === 'COMPLETE'
@@ -188,7 +322,7 @@ export class HandService {
         actorId: actor.playerId,
         payload: {
           action: decision.action,
-          source: 'PRIOR',
+          source: decision.source,
           reason: decision.reason,
           streetBefore: state.dealt.street,
           streetAfter: nextState.dealt.street,
@@ -207,9 +341,22 @@ export class HandService {
         aiDecision: {
           playerId: actor.playerId,
           profileVersionId: participant.profileVersionId,
+          provider: decision.provider,
+          model: decision.model,
+          source: decision.source,
+          promptVersion: decision.promptVersion,
           actorView: jsonRecord(actorView),
           output: jsonRecord(decision),
-          validation: { acceptedByRuleEngine: true },
+          validation: decision.validation,
+          ...(decision.latencyMs === undefined
+            ? {}
+            : { latencyMs: decision.latencyMs }),
+          ...(decision.inputTokens === undefined
+            ? {}
+            : { inputTokens: decision.inputTokens }),
+          ...(decision.outputTokens === undefined
+            ? {}
+            : { outputTokens: decision.outputTokens }),
         },
       })
     }

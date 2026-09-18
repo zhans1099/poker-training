@@ -153,6 +153,7 @@ CREATE TABLE `hand_participants`  (
   `id` varchar(30) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `hand_id` varchar(30) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `player_id` varchar(30) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `profile_version_id` varchar(30) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `seat_no` tinyint(0) UNSIGNED NOT NULL,
   `starting_stack` int(0) UNSIGNED NOT NULL,
   `ending_stack` int(0) UNSIGNED NULL DEFAULT NULL,
@@ -161,8 +162,10 @@ CREATE TABLE `hand_participants`  (
   UNIQUE INDEX `hand_participants_hand_id_seat_no_key`(`hand_id`, `seat_no`) USING BTREE,
   UNIQUE INDEX `hand_participants_hand_id_player_id_key`(`hand_id`, `player_id`) USING BTREE,
   INDEX `hand_participants_player_id_hand_id_idx`(`player_id`, `hand_id`) USING BTREE,
+  INDEX `hand_participants_profile_version_id_idx`(`profile_version_id`) USING BTREE,
   CONSTRAINT `hand_participants_hand_id_fkey` FOREIGN KEY (`hand_id`) REFERENCES `hands` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT `hand_participants_player_id_fkey` FOREIGN KEY (`player_id`) REFERENCES `players` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
+  CONSTRAINT `hand_participants_player_id_fkey` FOREIGN KEY (`player_id`) REFERENCES `players` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `hand_participants_profile_version_id_fkey` FOREIGN KEY (`profile_version_id`) REFERENCES `profile_versions` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
@@ -204,6 +207,7 @@ CREATE TABLE `hands`  (
   `seed_hash` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `version` int(0) UNSIGNED NOT NULL DEFAULT 0,
   `button_seat` tinyint(0) UNSIGNED NOT NULL,
+  `state` json NOT NULL,
   `result` json NULL,
   `state_hash` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
   `started_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),

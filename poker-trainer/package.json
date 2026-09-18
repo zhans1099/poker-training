@@ -8,6 +8,7 @@
     "db:generate": "pnpm --filter @poker-trainer/database db:generate",
     "db:push": "pnpm --filter @poker-trainer/database db:push",
     "db:seed": "pnpm --filter @poker-trainer/database db:seed",
+    "db:sync-ruoyi-env": "pnpm --filter @poker-trainer/database db:sync-ruoyi-env",
     "dev": "pnpm --filter @poker-trainer/web dev",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

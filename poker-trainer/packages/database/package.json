@@ -12,6 +12,7 @@
     "db:push": "prisma db push --config prisma.config.ts",
     "db:seed": "tsx scripts/seed.ts",
     "db:seed:sql": "tsx scripts/generate-seed-sql.ts",
+    "db:sync-ruoyi-env": "tsx scripts/sync-ruoyi-env.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {

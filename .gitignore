@@ -8,4 +8,5 @@ poker-trainer/packages/database/src/generated/
 poker-trainer/.pnpm-store/
 *.tsbuildinfo
 poker-trainer/.env
+poker-trainer/.env.docker
 .pnpm-store/

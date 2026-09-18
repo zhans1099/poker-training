@@ -65,7 +65,8 @@ export function liveSeats(hand: HeroHandView): SeatData[] {
       stack: seat.stack,
       position: String(seat.seat),
       ...(status === undefined ? {} : { status }),
-      ...(seat.playerId === hand.view.currentActorPlayerId
+      ...(hand.status === 'ACTIVE' &&
+      seat.playerId === hand.view.currentActorPlayerId
         ? { active: true }
         : {}),
       ...(isHero ? { hero: true } : {}),

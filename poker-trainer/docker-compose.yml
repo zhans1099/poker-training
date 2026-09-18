@@ -1,0 +1,76 @@
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: poker_trainer
+      MYSQL_USER: poker
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env.docker}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env.docker}
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - poker_mysql_data:/var/lib/mysql
+      - ./packages/database/sql/poker_trainer_schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./packages/database/sql/poker_trainer_seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - poker_internal
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: mysql://poker:${MYSQL_PASSWORD}@mysql:3306/poker_trainer
+      AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET in .env.docker}
+      APP_LOGIN_USERNAME: ${APP_LOGIN_USERNAME:?Set APP_LOGIN_USERNAME in .env.docker}
+      APP_LOGIN_PASSWORD: ${APP_LOGIN_PASSWORD:?Set APP_LOGIN_PASSWORD in .env.docker}
+      AI_PROVIDER: ${AI_PROVIDER:-qwen}
+      AI_PLAYER_MODEL: ${AI_PLAYER_MODEL:-qwen3.8-flash}
+      AI_REVIEW_MODEL: ${AI_REVIEW_MODEL:-deepseek-v4-pro}
+      QWEN_API_KEY: ${QWEN_API_KEY:-}
+      QWEN_BASE_URL: ${QWEN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
+      AI_PLAYER_MAX_LLM_DECISIONS_PER_TURN: ${AI_PLAYER_MAX_LLM_DECISIONS_PER_TURN:-2}
+    ports:
+      - '${APP_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-3000}:3000'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+    networks:
+      - poker_internal
+
+volumes:
+  poker_mysql_data:
+
+networks:
+  poker_internal:
+    driver: bridge

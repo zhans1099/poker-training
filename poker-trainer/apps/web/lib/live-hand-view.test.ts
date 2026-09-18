@@ -134,4 +134,15 @@ describe('live hand UI projection', () => {
   it('converts engine card codes into rendered cards', () => {
     expect(toCardData('Kh')).toEqual({ rank: 'K', suit: 'heart' })
   })
+
+  it('does not mark the stale last actor as active after completion', () => {
+    const completed = {
+      ...hand,
+      status: 'COMPLETED',
+      completedAt: '2026-09-17T00:03:00.000Z',
+      view: { ...hand.view, phase: 'COMPLETE' },
+    } satisfies HeroHandView
+
+    expect(liveSeats(completed).some((seat) => seat.active)).toBe(false)
+  })
 })

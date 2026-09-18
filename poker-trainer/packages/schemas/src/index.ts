@@ -82,6 +82,68 @@ export const createProfileVersionSchema = z
   })
   .strict()
 
+export const resolveProfileFeedbackSchema = z
+  .object({ resolution: z.enum(['ACCEPT', 'REJECT']) })
+  .strict()
+
+export const profileFeedbackRecordSchema = z
+  .object({
+    id: z.string(),
+    playerId: z.string(),
+    handId: z.string().nullable(),
+    sourceHandRef: z.string().nullable(),
+    sentiment: z.enum(['LIKE_PLAYER', 'UNLIKE_PLAYER', 'CORRECTION']),
+    trait: z.string().nullable(),
+    observation: z.string(),
+    observedAction: z.unknown().nullable(),
+    proposedPatch: z.unknown().nullable(),
+    confidence: z.number().min(0).max(1),
+    status: z.enum(['PENDING', 'ACCEPTED', 'REJECTED']),
+    appliedProfileVersionId: z.string().nullable(),
+    createdAt: z.string(),
+    resolvedAt: z.string().nullable(),
+    player: z
+      .object({ id: z.string(), displayName: z.string(), code: z.string() })
+      .optional(),
+  })
+  .passthrough()
+
+export const profileFeedbackListResponseSchema = z
+  .object({ data: z.array(profileFeedbackRecordSchema) })
+  .strict()
+
+export const profileFeedbackResponseSchema = z
+  .object({ data: profileFeedbackRecordSchema })
+  .strict()
+
+export const leakDashboardResponseSchema = z
+  .object({
+    data: z.array(
+      z.object({
+        code: z.string(),
+        street: z.string(),
+        count: z.number().int().positive(),
+        maxSeverity: z.number().int().min(1).max(5),
+        averageSeverity: z.number().min(1).max(5),
+        latestEvidence: z.string(),
+        recommendation: z.string(),
+        hands: z.array(
+          z.object({
+            id: z.string(),
+            handNo: z.number().int().positive(),
+            sessionId: z.string(),
+            completedAt: z.string().nullable(),
+          }),
+        ),
+      }),
+    ),
+  })
+  .strict()
+
+export type LeakDashboardItem = z.infer<
+  typeof leakDashboardResponseSchema
+>['data'][number]
+
 export const upsertOpponentReadSchema = z
   .object({
     observerId: z.string().trim().min(1).max(30),
@@ -103,6 +165,10 @@ export type CreateProfileFeedbackInput = z.infer<
 export type CreateProfileVersionInput = z.infer<
   typeof createProfileVersionSchema
 >
+export type ResolveProfileFeedbackInput = z.infer<
+  typeof resolveProfileFeedbackSchema
+>
+export type ProfileFeedbackRecord = z.infer<typeof profileFeedbackRecordSchema>
 export type UpsertOpponentReadInput = z.infer<typeof upsertOpponentReadSchema>
 
 const sessionParticipantSchema = z
@@ -172,6 +238,12 @@ export const createTrainingSessionSchema = z
 export const createHandSchema = z
   .object({
     buttonSeat: z.number().int().min(1).max(6),
+    randomizeSeats: z.boolean().default(false),
+  })
+  .strict()
+
+export const createNextHandSchema = z
+  .object({
     randomizeSeats: z.boolean().default(false),
   })
   .strict()
@@ -367,13 +439,74 @@ export const submitHandActionSchema = z
   })
   .strict()
 
+const handReviewContentSchema = z
+  .object({
+    summary: z.string(),
+    decisionReviews: z.array(
+      z.object({
+        eventSequence: z.number().int().positive(),
+        street: z.string(),
+        verdict: z.enum(['GOOD', 'MIXED', 'ERROR']),
+        explanation: z.string(),
+        recommendedAction: z.string(),
+      }),
+    ),
+    leaks: z.array(
+      z.object({
+        code: z.string(),
+        street: z.string(),
+        severity: z.number().int().min(1).max(5),
+        evidence: z.string(),
+        recommendation: z.string(),
+      }),
+    ),
+    profileObservations: z.array(
+      z.object({
+        playerId: z.string(),
+        observation: z.string(),
+        confidence: z.number().min(0).max(1),
+      }),
+    ),
+    audit: z
+      .object({
+        latencyMs: z.number().int().nonnegative(),
+        inputTokens: z.number().int().nonnegative().optional(),
+        outputTokens: z.number().int().nonnegative().optional(),
+      })
+      .optional(),
+  })
+  .passthrough()
+
+export const handReviewRecordSchema = z
+  .object({
+    id: z.string(),
+    handId: z.string(),
+    version: z.number().int().positive(),
+    provider: z.string(),
+    model: z.string(),
+    promptVersion: z.string(),
+    review: handReviewContentSchema,
+    createdAt: z.string(),
+  })
+  .passthrough()
+
+export const handReviewResponseSchema = z
+  .object({ data: handReviewRecordSchema })
+  .strict()
+
+export const handReviewListResponseSchema = z
+  .object({ data: z.array(handReviewRecordSchema) })
+  .strict()
+
 export type CreateTrainingSessionInput = z.infer<
   typeof createTrainingSessionSchema
 >
 export type CreateHandInput = z.infer<typeof createHandSchema>
+export type CreateNextHandInput = z.infer<typeof createNextHandSchema>
 export type HeroThoughtInput = z.infer<typeof heroThoughtInputSchema>
 export type HeroHandView = z.infer<typeof heroHandViewSchema>
 export type PlayerListItem = z.infer<
   typeof playerListResponseSchema
 >['data'][number]
 export type SubmitHandActionInput = z.infer<typeof submitHandActionSchema>
+export type HandReviewRecord = z.infer<typeof handReviewRecordSchema>
