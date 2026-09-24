@@ -9,4 +9,5 @@ poker-trainer/.pnpm-store/
 *.tsbuildinfo
 poker-trainer/.env
 poker-trainer/.env.docker
+poker-trainer/releases/
 .pnpm-store/

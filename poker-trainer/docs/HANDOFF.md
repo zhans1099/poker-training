@@ -7,9 +7,9 @@
 
 项目已完成规则引擎、MySQL 数据模型、画像机器人、真实 Qwen 玩家决策 Provider、真实手牌 API、桌面/手机牌桌、新建牌局入口和下一手流程。RuoYi 数据源已经接通，并完成真实的“建桌 → 随机换位 → 发牌 → Hero 决策 → AI 自动推进 → 下一手 → 数据库审计”闭环。
 
-本轮已新增单用户强制登录、伪装为普通“内部工作台”的登录页、页面/API 全局鉴权、退出登录、禁止 SEO 收录、健康检查、Dockerfile、Docker Compose 和 Docker 部署配置模板。当前已按用户要求暂停，Git 未提交。
+本轮已新增单用户强制登录、伪装为普通“内部工作台”的登录页、页面/API 全局鉴权、退出登录、禁止 SEO 收录、健康检查、Docker Compose 和本地编译后自动上传脚本。Git 未提交。
 
-第一次真实 Docker 应用镜像构建成功。构建日志发现 Debian slim 缺少 OpenSSL，随后已把 OpenSSL 固化到共享基础镜像；第二次重建已确认 Prisma 不再出现 OpenSSL 兼容警告，但在 Next.js 下载 Linux SWC 阶段收到用户暂停指令，因此主动中断。恢复后应重新执行最终 Docker build。
+用户最终明确不使用自建应用镜像：服务器已有 `node:22-bookworm` 和 `mysql:8.4`，本地生成 Next.js standalone 编译产物后，只上传运行文件、静态文件、SQL、Compose 和环境配置。服务器使用现有 Node 镜像挂载编译产物，执行 `docker compose up -d --pull never --no-build`，不编译、不拉镜像。
 
 当前下一优先级是真实牌例结构化录入、草稿、合法性报告与一键复盘。
 
@@ -151,8 +151,10 @@ APP_LOGIN_PASSWORD
 - HTTP 本地部署不错误设置 Secure Cookie；通过 HTTPS 或 `X-Forwarded-Proto: https` 反向代理时自动启用 Secure。
 - Metadata、`robots.txt` 和全站 `X-Robots-Tag` 三层禁止搜索引擎索引、跟踪、缓存和摘要。
 - Docker 默认只绑定 `127.0.0.1:3000`，不会直接监听公网网卡。
-- `Dockerfile` 使用 Node 22、pnpm 11.8、OpenSSL、非 root `node` 用户运行。
-- `docker-compose.yml` 包含 MySQL 8.4、持久卷、首次数据库/种子初始化、服务健康检查和内部网络。
+- Next.js 已启用 `output: standalone`，便于在本机编译后独立运行。
+- `docker-compose.yml` 直接使用服务器已有的 Node 22 与 MySQL 8.4 镜像，挂载 `release` 编译产物；包含持久卷、首次数据库/种子初始化、服务健康检查和内部网络。
+- `scripts/package-and-deploy.ps1` 自动执行本地生产构建、收集 standalone/static、打包、scp 上传、ssh 解压并远程启动 Compose；部署位置固定为 `/home/poker-trainer/`，覆盖式更新且只保留最新版本。
+- 远程启动强制使用 `--pull never --no-build`，不会在服务器构建或拉取镜像。
 - `.env.docker.example` 提供无密钥的部署配置模板；真实 `.env.docker` 已加入 Git 与 Docker 构建忽略规则。
 - 基础 SQL 中误混入的 `Loaded Prisma config...` 命令输出已删除，避免 MySQL 首次初始化失败。
 
@@ -228,13 +230,13 @@ pnpm build 通过
 - 登录页桌面和 390×844 手机布局无横向溢出，控制台无错误；
 - `robots.txt` 返回 `Disallow: /`，页面响应包含 `X-Robots-Tag: noindex, nofollow, noarchive, nosnippet, noimageindex`。
 
-Docker 验证状态：
+Docker/上传脚本验证状态：
 
-- `docker compose --env-file .env.docker.example config --quiet` 通过；
-- 第一版应用镜像 `poker-trainer-app:latest` 已真实构建成功；
-- OpenSSL 修复后的第二次构建中，Prisma 已不再报告 OpenSSL 警告；
-- 第二次构建在 Next.js 下载 Linux SWC 时因用户要求暂停而主动中断，不能把它记录为最终构建通过；
-- 尚未执行完整的 `docker compose up`，也尚未验证全新 MySQL 数据卷自动导入和容器间健康检查。
+- 旧的自建镜像方案已按用户要求移除，不应再执行 Docker build；
+- 当前 Compose 只引用 `node:22-bookworm` 和 `mysql:8.4`；
+- 本地 `-PackageOnly -SkipBuild` 演练通过：生成约 132.7 MB 的 tar.gz，包含 22036 个条目；server.js、静态文件、两份 SQL、Compose 和部署 `.env` 均存在；已确认未夹带 Next standalone 自动复制的本机 `.env`；
+- 尚未提供真实服务器地址，因此 scp、ssh 和远程 Compose 启动未实测；
+- 尚未验证全新 MySQL 数据卷自动导入和容器间健康检查。
 
 Qwen 真实联调结果：
 
@@ -245,10 +247,10 @@ Qwen 真实联调结果：
 
 ## 7. 恢复开发的第一组任务
 
-1. 重新执行 `docker compose --env-file .env.docker.example build app`，确认 OpenSSL 修复后的最终镜像完整构建成功。
-2. 使用专门的临时 `.env.docker` 执行完整 `docker compose up -d`，验证空 MySQL 数据卷初始化、6 名种子玩家、健康检查、登录和一手牌流程；验收后只清理本轮创建的测试容器/卷。
-3. 补充生产部署说明，包括 HTTPS 反向代理、数据库备份/恢复和升级步骤。
-4. 再继续真实牌例结构化录入、草稿、合法性报告与一键复盘。
+1. 执行生产构建，确认 `.next/standalone/apps/web/server.js` 及静态文件产物结构。
+2. 对 `scripts/package-and-deploy.ps1` 做 PowerShell 语法、参数验证和本地打包演练。
+3. 用户提供服务器 SSH 地址后，实测上传、远程解压和 `docker compose up -d --pull never --no-build`。
+4. 验证空 MySQL 数据卷初始化、6 名种子玩家、健康检查、登录和一手牌流程。
 
 ## 8. LLM 接入状态与下一步
 
@@ -287,7 +289,7 @@ PlayerDecisionProvider
 
 部署收口仍缺：
 
-1. OpenSSL 修复后的最终 Docker 镜像完整重建。
+1. standalone 本地打包与真实服务器上传演练。
 2. 全新 Compose 栈（空数据卷）的端到端启动验证。
 3. HTTPS 反向代理范例。
 4. MySQL 自动备份、恢复和版本升级文档。
@@ -315,19 +317,15 @@ pnpm build
 pnpm dev
 ```
 
-Docker 部署与恢复验收：
+本地编译、打包、上传并启动：
 
 ```powershell
 Copy-Item .env.docker.example .env.docker
 # 手工填写强密码、AUTH_SECRET、登录账号密码和模型 Key
-docker compose --env-file .env.docker config
-docker compose --env-file .env.docker build app
-docker compose --env-file .env.docker up -d
-docker compose --env-file .env.docker ps
-docker compose --env-file .env.docker logs --tail 200 app mysql
+.\scripts\package-and-deploy.ps1 -Server root@服务器IP
 ```
 
-注意：不要把 `.env.docker` 提交到 Git。测试全新数据库初始化时必须使用明确命名的临时 Compose project/volume，确认目标后再清理，禁止误删现有 `poker_mysql_data`。
+脚本默认本地编译并部署到服务器固定目录 `/home/poker-trainer/`，覆盖旧程序文件，不建立历史版本目录；本地包名固定为 `poker-trainer-latest.tar.gz`。`-NoStart` 会替换文件但不启动，`-KeepPackage` 保留本地 tar.gz。覆盖部署不会执行 `docker compose down -v`，因此已有 `poker_mysql_data` 数据卷会保留。注意不要把 `.env.docker` 或生成的部署包提交到 Git；部署包内包含真实凭据。
 
 数据库命令：
 
